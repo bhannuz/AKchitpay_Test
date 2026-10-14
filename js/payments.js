@@ -88,15 +88,61 @@ async function buildSingleMonthDropdown(){
             if(!paidSlots.has(i)){autoSelect=i;break;}
         }
     }
+    const chitAmount=parseFloat(document.getElementById('pChit').value)||0;
+    const isVariableAmount=grp&&grp.amtType==='variable';
+    const ps=await getCollection('payments');
     sel.innerHTML='<option value="">-- Select Month --</option>'+allDueDates.map((dd,i)=>{
         const isPaid=paidSlots.has(i);
         const isPast=dd<today;
         const isCurrent=i===currentSlot;
         let tag='';
-        if(isPaid) tag=' ✅ Paid';
-        else if(isCurrent) tag=' ← Current';
-        else if(isPast) tag=' ⚠ Overdue';
-        else tag=' (Upcoming)';
+        if(isVariableAmount){
+            if(isPaid){
+                let totalPaidForMonth=0;
+                ps.forEach(p=>{
+                    if(p.memberId!==mid||p.groupId!==gid)return;
+                    const pSlot=p.slotNum?Number(p.slotNum):1;
+                    if(pSlot!==Number(sn))return;
+                    if(eid&&p.enrollmentId&&p.enrollmentId!==''){if(p.enrollmentId!==eid)return;}
+                    if(Array.isArray(p.monthSlots)&&p.monthSlots.includes(i)){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                    else if(p.monthSlot===i){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                });
+                if(totalPaidForMonth>0){
+                    tag=' ⚠ Partial';
+                }else{
+                    tag=' ← Current';
+                }
+            }else if(isPast){
+                tag=' ⚠ Overdue';
+            }else{
+                tag=' (Upcoming)';
+            }
+        }else{
+            if(isPaid){
+                let totalPaidForMonth=0;
+                ps.forEach(p=>{
+                    if(p.memberId!==mid||p.groupId!==gid)return;
+                    const pSlot=p.slotNum?Number(p.slotNum):1;
+                    if(pSlot!==Number(sn))return;
+                    if(eid&&p.enrollmentId&&p.enrollmentId!==''){if(p.enrollmentId!==eid)return;}
+                    if(Array.isArray(p.monthSlots)&&p.monthSlots.includes(i)){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                    else if(p.monthSlot===i){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                });
+                if(chitAmount>0&&totalPaidForMonth>=chitAmount){
+                    tag=' ✅ Paid';
+                }else if(chitAmount>0&&totalPaidForMonth>0){
+                    tag=' ⚠ Partial';
+                }else{
+                    tag=' ✅ Paid';
+                }
+            }else if(isCurrent){
+                tag=' ← Current';
+            }else if(isPast){
+                tag=' ⚠ Overdue';
+            }else{
+                tag=' (Upcoming)';
+            }
+        }
         return `<option value="${i}" ${i===autoSelect?'selected':''}>${fmtDate(dd)}${tag}</option>`;
     }).join('');
     onSingleMonthSlotChange();
@@ -132,20 +178,101 @@ async function buildMonthSelectorGrid(){
     const {paidSlots,allDueDates}=await getPaidSlots(mid,gid,grp,eid,sn);
     if(!allDueDates.length){grid.innerHTML='<div style="color:#f87171;font-size:0.92rem;">No due dates configured for this group</div>';return;}
     const today=new Date().toISOString().split('T')[0];
+    const chitAmount=parseFloat(document.getElementById('pChit').value)||0;
+    const isVariableAmount=grp&&grp.amtType==='variable';
+    const ps=await getCollection('payments');
+    window._monthPaidMap={};
     grid.innerHTML=allDueDates.map((dd,i)=>{
         const paid=paidSlots.has(i);
         const isPast=dd<=today;
-        const label=paid?'✅':(isPast?'⚠':'·');
-        const color=paid?'#34d399':(isPast?'#f87171':'var(--text-dim)');
+        let totalPaidForMonth=0;
+        let splitPaidForMonth=0; // multi-month payments split evenly across their months
+        if(paid){
+            ps.forEach(p=>{
+                if(p.memberId!==mid||p.groupId!==gid)return;
+                const pSlot=p.slotNum?Number(p.slotNum):1;
+                if(pSlot!==Number(sn))return;
+                if(eid&&p.enrollmentId&&p.enrollmentId!==''){if(p.enrollmentId!==eid)return;}
+                if(Array.isArray(p.monthSlots)&&p.monthSlots.includes(i)){
+                    totalPaidForMonth+=parseFloat(p.paid)||0;
+                    splitPaidForMonth+=(parseFloat(p.paid)||0)/(p.monthSlots.length||1);
+                }
+                else if(p.monthSlot===i){totalPaidForMonth+=parseFloat(p.paid)||0;splitPaidForMonth+=parseFloat(p.paid)||0;}
+            });
+        }
+        window._monthPaidMap[i]=splitPaidForMonth;
+        let label='·';
+        let statusText='';
+        let color='var(--text-dim)';
+        if(isVariableAmount){
+            if(paid&&totalPaidForMonth>0){
+                label='⚠';
+                statusText='Partial';
+                color='#f59e0b';
+            }else if(isPast){
+                label='○';
+                statusText='Overdue';
+                color='#f87171';
+            }else{
+                label='·';
+                statusText='Upcoming';
+                color='var(--text-dim)';
+            }
+        }else{
+            if(paid){
+                if(chitAmount>0&&totalPaidForMonth>=chitAmount){
+                    label='✅';
+                    statusText='Paid';
+                    color='#34d399';
+                }else if(chitAmount>0&&totalPaidForMonth>0){
+                    label='⚠';
+                    statusText='Partial';
+                    color='#f59e0b';
+                }else{
+                    label='✅';
+                    statusText='Paid';
+                    color='#34d399';
+                }
+            }else if(isPast){
+                label='○';
+                statusText='Overdue';
+                color='#f87171';
+            }else{
+                label='·';
+                statusText='Upcoming';
+                color='var(--text-dim)';
+            }
+        }
         return`<label class="month-cb-item ${paid?'already-paid':''}" style="padding:4px 5px;gap:3px;">
-            <input type="checkbox" value="${i}" ${paid?'disabled checked':''} onchange="updateSelectedSummary();calcBalance();" style="width:11px;height:11px;margin:0;">
+            <input type="checkbox" value="${i}" onchange="updateSelectedSummary();calcBalance();" style="width:11px;height:11px;margin:0;">
             <div style="min-width:0;">
                 <div style="font-size:0.65rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fmtDate(dd)}</div>
-                <div style="font-size:0.6rem;color:${color};">${label}</div>
+                <div style="font-size:0.6rem;color:${color};">${label} ${statusText}</div>
+                <div class="mb-paid" data-slot="${i}" style="font-size:0.6rem;font-weight:700;white-space:nowrap;color:#34d399;"></div>
+                <div class="mb-bal" data-slot="${i}" style="font-size:0.6rem;font-weight:700;white-space:nowrap;"></div>
             </div>
         </label>`;
     }).join('');
+    updateMonthBalances();
     updateSelectedSummary();
+}
+
+// Fills the "Bal ₹X" line on every month tile from the current Chit Amt
+function updateMonthBalances(){
+    const chit=parseFloat(document.getElementById('pChit').value)||0;
+    const map=window._monthPaidMap||{};
+    document.querySelectorAll('#monthSelectorGrid .mb-bal').forEach(el=>{
+        if(!chit){el.textContent='';return;}
+        const bal=Math.max(0,chit-(map[el.dataset.slot]||0));
+        el.textContent='Bal \u20b9'+Math.round(bal).toLocaleString('en-IN');
+        el.style.color=bal===0?'#34d399':(map[el.dataset.slot]>0?'#f59e0b':'#cbd5e1');
+    });
+    // Partial months: also show how much has been paid so far
+    document.querySelectorAll('#monthSelectorGrid .mb-paid').forEach(el=>{
+        const paidAmt=map[el.dataset.slot]||0;
+        const partial=chit>0 && paidAmt>0 && paidAmt<chit;
+        el.textContent=partial?'Paid \u20b9'+Math.round(paidAmt).toLocaleString('en-IN'):'';
+    });
 }
 
 function updateSelectedSummary(){
@@ -218,12 +345,27 @@ function getPerMonthAmounts(){
 }
 
 function calcBalance(){
+    updateMonthBalances();
     const chit=parseFloat(document.getElementById('pChit').value)||0;
     const paid=parseFloat(document.getElementById('pPaid').value)||0;
     const isMulti=document.getElementById('pNumMonths').value==='multi';
+    const ref=document.getElementById('totalChitRef');
+    const fmt=v=>`\u20b9${v.toLocaleString('en-IN')}`;
+    const setPrev=v=>{
+        const w=document.getElementById('prevPaidWrap');
+        if(v>0){document.getElementById('prevPaidVal').textContent=fmt(v);w.style.display='inline';}
+        else w.style.display='none';
+    };
+    const show=(totalTxt,bal,prev)=>{
+        document.getElementById('totalChitVal').textContent=totalTxt;
+        document.getElementById('totalBalVal').textContent=fmt(bal);
+        setPrev(prev||0);
+        ref.style.display='flex';
+    };
     if(isMulti){
         const selectedCBs=Array.from(document.querySelectorAll('#monthSelectorGrid input[type=checkbox]:checked:not(:disabled)'));
-        const n=Math.max(1,selectedCBs.length);
+        const n=selectedCBs.length;
+        if(!chit||n===0){ref.style.display='none';return;}
         const isCustom=document.getElementById('perMonthCustomToggle')?.checked;
         let totalChit=0;
         if(isCustom){
@@ -233,20 +375,34 @@ function calcBalance(){
             totalChit=chit*n;
         }
         const bal=Math.max(0,totalChit-paid);
-        if(n>1){
-            document.getElementById('totalChitRef').style.display='block';
-            document.getElementById('totalChitVal').textContent=isCustom
-                ? `\u20b9${totalChit.toLocaleString('en-IN')} (${n} months, custom amounts)`
-                : `\u20b9${totalChit.toLocaleString('en-IN')} (${n}\u00d7\u20b9${chit.toLocaleString('en-IN')})`;
-            document.getElementById('totalBalVal').textContent=`\u20b9${bal.toLocaleString('en-IN')}`;
-        } else {
-            document.getElementById('totalChitRef').style.display='none';
-        }
+        const totalTxt=n===1 ? fmt(totalChit)
+            : (isCustom ? `${fmt(totalChit)} (${n} months, custom amounts)`
+                        : `${fmt(totalChit)} (${n}\u00d7${fmt(chit)})`);
+        show(totalTxt,bal,0);
     } else {
-        document.getElementById('totalChitRef').style.display='none';
+        // Single month: balance also accounts for earlier part-payments of that month
+        const slotVal=document.getElementById('pSingleMonthSlot').value;
+        if(!chit||slotVal===''){ref.style.display='none';return;}
+        const seq=window._calcBalSeq=(window._calcBalSeq||0)+1;
+        const mid=document.getElementById('pMember').value;
+        const gid=document.getElementById('pGroup').value;
+        const eid=document.getElementById('pEnrollmentId').value||'';
+        const sn=parseInt(document.getElementById('pSlotNum').value||'1');
+        const slot=parseInt(slotVal);
+        getCollection('payments').then(ps=>{
+            if(seq!==window._calcBalSeq) return; // a newer calc superseded this one
+            const prev=ps.filter(p=>p.memberId===mid && p.groupId===gid &&
+                (p.enrollmentId||'')===eid &&
+                (p.slotNum?Number(p.slotNum):1)===sn &&
+                (Array.isArray(p.monthSlots) ? p.monthSlots.includes(slot) : p.monthSlot===slot))
+                .reduce((s,p)=>{
+                    const slots=Array.isArray(p.monthSlots)?p.monthSlots:(p.monthSlot!=null?[p.monthSlot]:[]);
+                    return s+((parseFloat(p.paid)||0)/(slots.length||1));
+                },0);
+            show(fmt(chit),Math.max(0,chit-prev-paid),prev);
+        }).catch(()=>{ show(fmt(chit),Math.max(0,chit-paid),0); });
     }
 }
-
 
 
 // PAYMENT FORM
@@ -282,7 +438,7 @@ function resetPaymentForm(){
     window._singleMonthPaidSlots=new Set();
     // Initialize correct mode UI (multi is default, onchange won't fire)
     onNumMonthsChange();
-    populatePaidBySelect('pPaidBy');
+    loadPaidByOptions().then(()=>populatePaidBySelect('pPaidBy'));
 }
 
 function openPaymentModal(){
@@ -426,6 +582,7 @@ async function savePayment(){
         const chitPicked=document.getElementById('pChitPicked').value;
         const chitPickedBy=document.getElementById('pChitPickedBy').value.trim();
         const mode = document.getElementById('pNumMonths').value;
+        let ackData=null; // set when chit is picked, used for the WhatsApp acknowledgement
 
         if(!mid){showToast('❌ Select a member',false);return;}
         if(!gid){showToast('❌ Select a group',false);return;}
@@ -439,14 +596,29 @@ async function savePayment(){
             if(selectedSlot===null){showToast('❌ Select which month this payment is for',false);return;}
             
             const monthSlots = [selectedSlot];
-            const balance = Math.max(0, chitPerMonth - paid);
             const enrollmentId1 = document.getElementById('pEnrollmentId').value||'';
             const slotNum1 = parseInt(document.getElementById('pSlotNum').value||'1');
+
+            // BUGFIX: if this month already has other (partial) payments recorded, the
+            // remaining balance must be computed against everything paid for the month so
+            // far — not just this single payment — otherwise splitting a month's payment
+            // into installments makes the stored balance overstate what's actually owed.
+            const psForBal = await getCollection('payments');
+            const alreadyPaidThisMonth = psForBal
+                .filter(p=>p.memberId===mid && p.groupId===gid &&
+                    (p.enrollmentId||'')===enrollmentId1 &&
+                    (p.slotNum?Number(p.slotNum):1)===slotNum1 &&
+                    (Array.isArray(p.monthSlots) ? p.monthSlots.includes(selectedSlot) : p.monthSlot===selectedSlot))
+                .reduce((s,p)=>{
+                    const slots = Array.isArray(p.monthSlots) ? p.monthSlots : (p.monthSlot!=null?[p.monthSlot]:[]);
+                    const n = slots.length||1;
+                    return s + ((parseFloat(p.paid)||0)/n);
+                },0);
+            const balance = Math.max(0, chitPerMonth - alreadyPaidThisMonth - paid);
             
             // Check if THIS enrollment slot already picked chit
             if(chitPicked==='Yes'){
-                const ps=await getCollection('payments');
-                const alreadyPicked=await isChitAlreadyPicked(ps,mid,gid,enrollmentId1,slotNum1);
+                const alreadyPicked=await isChitAlreadyPicked(psForBal,mid,gid,enrollmentId1,slotNum1);
                 if(alreadyPicked){showToast('❌ Chit already picked for this slot',false);return;}
             }
             
@@ -455,8 +627,10 @@ async function savePayment(){
                 memberId:mid, groupId:gid, enrollmentId:enrollmentId1, slotNum:slotNum1, date,
                 chit:chitPerMonth, paid, balance, paidBy, chitPicked, chitPickedBy,
                 numMonths:1, monthSlots, monthSlot:selectedSlot,
-                paidPerMonth:paid, balPerMonth:balance, paymentNote:paymentNote1
+                paidPerMonth:paid, balPerMonth:balance, paymentNote:paymentNote1,
+                ackPay:'pending', ...(chitPicked==='Yes'?{ackChit:'pending'}:{})
             });
+            if(chitPicked==='Yes') ackData={mid,gid,slot:selectedSlot,date,chitPickedBy,chit:chitPerMonth};
             
         } else {
             // Multiple month mode
@@ -481,8 +655,10 @@ async function savePayment(){
                 memberId:mid, groupId:gid, enrollmentId:enrollmentId1, slotNum:slotNum1, date,
                 chit:chitPerMonth, paid, balance, paidBy, chitPicked, chitPickedBy,
                 numMonths, monthSlots, monthSlot:monthSlots[0],
-                paidPerMonth:paid/numMonths, balPerMonth:balance/numMonths, paymentNote:paymentNote2
+                paidPerMonth:paid/numMonths, balPerMonth:balance/numMonths, paymentNote:paymentNote2,
+                ackPay:'pending', ...(chitPicked==='Yes'?{ackChit:'pending'}:{})
             });
+            if(chitPicked==='Yes') ackData={mid,gid,slot:monthSlots[0],date,chitPickedBy,chit:chitPerMonth};
         }
         
         bustCache('payments');
@@ -497,9 +673,99 @@ async function savePayment(){
             await loadMemberLedger();
         }
         
+        if(typeof refreshAckBadge==='function') refreshAckBadge();
+        
     } catch(error) {
         console.error('Payment save error:', error);
         showToast('❌ ' + error.message, false);
+    }
+}
+
+// ══════════════════════════════════════════
+// CHIT PICKED — WHATSAPP ACKNOWLEDGEMENT
+// ══════════════════════════════════════════
+function buildChitPickedMessage(d){
+    const L=[];
+    L.push(`Dear ${d.name},`);
+    L.push('');
+    L.push('Greetings from *AK Chit Funds*.');
+    L.push('');
+    L.push(`This is to acknowledge that you have picked the chit for the month of *${d.monthLabel}* in the group *${d.groupName}*.`);
+    L.push('');
+    L.push('*Chit Details*');
+    L.push(`Group: ${d.groupName}`);
+    L.push(`Month: ${d.monthLabel}`);
+    if(d.pickedValue>0) L.push(`Chit value: ${fmtAmt(d.pickedValue)}`);
+    L.push(`Recorded on: ${d.dateLabel}`);
+    L.push('');
+    L.push('Our team will contact you shortly regarding the next steps. For any clarification, please feel free to reach out to us.');
+    L.push('');
+    L.push('Thank you for your continued trust in us.');
+    L.push('');
+    L.push('Warm regards,');
+    L.push('*AK Chit Funds*');
+    return L.join('\n');
+}
+
+async function showChitPickedAck(data){
+    try{
+        if(!data||!data.mid||!data.gid) return;
+        const [ms,gs]=await Promise.all([getCollection('members'),getCollection('groups')]);
+        const m=ms.find(x=>x.id===data.mid);
+        const g=gs.find(x=>x.id===data.gid);
+        if(!m||!g) return;
+        const dueDates=getGroupDueDates(g);
+        const due=(data.slot!=null&&dueDates[data.slot])?dueDates[data.slot]:null;
+        let monthLabel='the selected month';
+        if(due){
+            const mn=['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const [y,mo]=due.split('-');
+            monthLabel=`${mn[parseInt(mo,10)-1]} ${y}`;
+        }
+        const msg=buildChitPickedMessage({
+            name:m.name||'Member',
+            groupName:g.name||'',
+            monthLabel,
+            pickedValue:parseFloat(data.chitPickedBy)||0,
+            dateLabel:fmtDate(data.date)
+        });
+        let phone=(m.phone||'').replace(/\D/g,'');
+        if(phone.length===10) phone='91'+phone;
+
+        let ov=document.getElementById('chitAckModal');
+        if(ov) ov.remove();
+        ov=document.createElement('div');
+        ov.id='chitAckModal';
+        ov.className='modal-overlay';
+        ov.style.cssText='display:block;z-index:2100;';
+        ov.innerHTML=`<div class="modal-content-custom" style="max-height:92vh;overflow-y:auto;padding:14px 16px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <div style="font-size:1rem;font-weight:800;color:#34d399;flex:1;">🏆 Chit Picked — Send Acknowledgement</div>
+                <button type="button" onclick="document.getElementById('chitAckModal').remove()" style="background:none;border:none;color:var(--text-dim);font-size:1.2rem;cursor:pointer;padding:2px 6px;">✕</button>
+            </div>
+            <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:6px;">To: <b style="color:white;">${m.name||''}</b> &nbsp;📞 ${phone?('+'+phone):'<span style="color:#f87171;">No phone number saved</span>'}</div>
+            <textarea id="chitAckText" class="form-input" rows="14" style="font-size:0.8rem;resize:vertical;margin-bottom:8px;"></textarea>
+            <div style="display:flex;gap:8px;">
+                <button type="button" id="chitAckSend" class="btn btn-success fw-bold" style="flex:1;border-radius:12px;padding:10px;background:#25D366;border:none;color:white;">💬 Send on WhatsApp</button>
+                <button type="button" id="chitAckCopy" class="btn fw-bold" style="border-radius:12px;padding:10px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;">📋 Copy</button>
+                <button type="button" onclick="document.getElementById('chitAckModal').remove()" class="btn fw-bold" style="border-radius:12px;padding:10px;background:var(--input-bg);border:1px solid var(--border);color:white;">Skip</button>
+            </div>
+        </div>`;
+        document.body.appendChild(ov);
+        const ta=document.getElementById('chitAckText');
+        ta.value=msg;
+        const sendBtn=document.getElementById('chitAckSend');
+        if(!phone){ sendBtn.disabled=true; sendBtn.style.opacity='.5'; }
+        sendBtn.onclick=()=>{
+            window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(ta.value),'_blank');
+            ov.remove();
+        };
+        document.getElementById('chitAckCopy').onclick=async()=>{
+            try{ await navigator.clipboard.writeText(ta.value); showToast('✅ Message copied'); }
+            catch(e){ ta.select(); document.execCommand('copy'); showToast('✅ Message copied'); }
+        };
+    }catch(err){
+        console.error('Chit acknowledgement error:',err);
     }
 }
 
@@ -562,11 +828,16 @@ async function saveEditPayment(){
     if(!date)return showToast('\u274c Enter date',false);
     if(!paid)return showToast('\u274c Enter amount paid',false);
     const paymentNote=getEditPaymentNoteText();
-    await db.collection('payments').doc(pid).update({date,chit,paid,balance,paidBy,chitPicked,chitPickedBy,paymentNote});
+    const psBefore=await getCollection('payments');
+    const before=psBefore.find(x=>x.id===pid)||{};
+    const upd={date,chit,paid,balance,paidBy,chitPicked,chitPickedBy,paymentNote};
+    if(chitPicked==='Yes' && before.chitPicked!=='Yes') upd.ackChit='pending'; // queue chit-picked acknowledgement
+    await db.collection('payments').doc(pid).update(upd);
     bustCache('payments');
     closeModal('editPaymentModal');showToast('\u2705 Payment updated!');updateUI();
     const mid=document.getElementById('summaryView').value;
     if(mid)loadMemberLedger();
+    if(typeof refreshAckBadge==='function') refreshAckBadge();
 }
 
 async function deletePayment(){
@@ -584,10 +855,10 @@ async function deletePayment(){
 // ══════════════════════════════════════════
 
 
-// ── Paid By: Editable Combo Dropdown ──────────────────────
+// ── Paid By: Editable Combo Dropdown (Firestore-synced) ────
 const DEFAULT_PAID_BY = ['UPI','GPay','PhonePe','PPay','Bank Transfer','Cash','Cheque'];
 let _paidByOptions = null;
-let _managingFor = null; // which input id triggered manage modal
+let _managingFor = null;
 
 function getPaidByOptions() {
     if (_paidByOptions) return _paidByOptions;
@@ -598,8 +869,32 @@ function getPaidByOptions() {
     return _paidByOptions;
 }
 
-function savePaidByToStorage() {
-    try { localStorage.setItem('ak_paidby_options', JSON.stringify(_paidByOptions)); } catch(e){}
+async function loadPaidByOptions() {
+    try {
+        const doc = await db.collection('settings').doc('paidByOptions').get();
+        if (doc.exists && Array.isArray(doc.data().options)) {
+            _paidByOptions = doc.data().options;
+        } else {
+            _paidByOptions = [...DEFAULT_PAID_BY];
+        }
+        localStorage.setItem('ak_paidby_options', JSON.stringify(_paidByOptions));
+    } catch(e) {
+        try {
+            const stored = localStorage.getItem('ak_paidby_options');
+            _paidByOptions = stored ? JSON.parse(stored) : [...DEFAULT_PAID_BY];
+        } catch(e2) { _paidByOptions = [...DEFAULT_PAID_BY]; }
+    }
+    return _paidByOptions;
+}
+
+async function savePaidByToStorage() {
+    try {
+        await db.collection('settings').doc('paidByOptions').set({ options: _paidByOptions });
+        localStorage.setItem('ak_paidby_options', JSON.stringify(_paidByOptions));
+    } catch(e) {
+        try { localStorage.setItem('ak_paidby_options', JSON.stringify(_paidByOptions)); } catch(e2){}
+        showToast('⚠️ Saved locally only — check connection', false);
+    }
 }
 
 function populatePaidBySelect(selectId){
@@ -693,8 +988,8 @@ function movePaidByOption(i, dir) {
     renderPaidByOptionsList();
 }
 
-function savePaidByOptions() {
-    savePaidByToStorage();
+async function savePaidByOptions() {
+    await savePaidByToStorage();
     populatePaidBySelect('pPaidBy');
     closeModal('managePaidByModal');
     showToast('✅ Payment modes saved!');
@@ -768,11 +1063,61 @@ async function populateSingleMonthDropdown() {
     const eid=document.getElementById('pEnrollmentId').value||'';
     const sn=parseInt(document.getElementById('pSlotNum').value||'1');
     const {paidSlots, allDueDates} = await getPaidSlots(mid, gid, grp, eid, sn);
+    const chitAmount=parseFloat(document.getElementById('pChit').value)||0;
+    const isVariableAmount=grp&&grp.amtType==='variable';
+    const ps=await getCollection('payments');
+    const today=new Date().toISOString().split('T')[0];
     
     sel.innerHTML = allDueDates.map((dd, i) => {
         const paid = paidSlots.has(i);
-        const label = fmtDate(dd) + (paid ? ' ✅ Paid' : '');
-        return `<option value="${i}" ${paid ? 'disabled' : ''}>${label}</option>`;
+        const isPast = dd < today;
+        let status = '';
+        
+        if(isVariableAmount){
+            if(paid){
+                let totalPaidForMonth=0;
+                ps.forEach(p=>{
+                    if(p.memberId!==mid||p.groupId!==gid)return;
+                    const pSlot=p.slotNum?Number(p.slotNum):1;
+                    if(pSlot!==Number(sn))return;
+                    if(eid&&p.enrollmentId&&p.enrollmentId!==''){if(p.enrollmentId!==eid)return;}
+                    if(Array.isArray(p.monthSlots)&&p.monthSlots.includes(i)){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                    else if(p.monthSlot===i){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                });
+                if(totalPaidForMonth>0){
+                    status=' ⚠ Partial';
+                }
+            }else if(isPast){
+                status=' ⚠ Overdue';
+            }else{
+                status=' (Upcoming)';
+            }
+        }else{
+            if(paid){
+                let totalPaidForMonth=0;
+                ps.forEach(p=>{
+                    if(p.memberId!==mid||p.groupId!==gid)return;
+                    const pSlot=p.slotNum?Number(p.slotNum):1;
+                    if(pSlot!==Number(sn))return;
+                    if(eid&&p.enrollmentId&&p.enrollmentId!==''){if(p.enrollmentId!==eid)return;}
+                    if(Array.isArray(p.monthSlots)&&p.monthSlots.includes(i)){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                    else if(p.monthSlot===i){totalPaidForMonth+=parseFloat(p.paid)||0;}
+                });
+                if(chitAmount>0&&totalPaidForMonth>=chitAmount){
+                    status=' ✅ Paid';
+                }else if(chitAmount>0&&totalPaidForMonth>0){
+                    status=' ⚠ Partial';
+                }else{
+                    status=' ✅ Paid';
+                }
+            }else if(isPast){
+                status=' ⚠ Overdue';
+            }else{
+                status=' (Upcoming)';
+            }
+        }
+        const label = fmtDate(dd) + status;
+        return `<option value="${i}">${label}</option>`;
     }).join('');
     
     sel.value = '';
@@ -793,6 +1138,7 @@ function onSingleMonthSlotChange() {
         badge.style.color = '#34d399';
     }
     
+    calcBalance();
     updateChitPickedOptionForMode();
 }
 
