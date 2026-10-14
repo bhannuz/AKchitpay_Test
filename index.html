@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>AK Chit Funds - Admin Portal</title>
+    <title id="appPageTitle">AK Chit Funds - Admin Portal</title>
 
     <!-- ── Styles ── -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -17,7 +17,7 @@
     <script>
         (function(){
             try {
-                var s = sessionStorage.getItem('akdf_session');
+                var s = sessionStorage.getItem(typeof APP_CONFIG!=='undefined'?APP_CONFIG.sessionKey:'akdf_session');
                 if(s){ var u=JSON.parse(s); if(u&&u.role==='admin') document.documentElement.classList.add('admin-mode-early'); }
             }catch(e){}
         })();
@@ -34,8 +34,8 @@
 <div id="loginScreen" style="display:flex;position:fixed;top:0;left:0;width:100%;height:100%;background:#070b14;z-index:9999;align-items:center;justify-content:center;padding:20px;overflow-y:auto;">
     <div class="login-card">
         <div class="login-brand">
-            <img src="logo.png" alt="AK Chit Funds" style="width:56px;height:56px;border-radius:14px;object-fit:cover;margin-bottom:12px;">
-            <div class="login-brand-title">AK Chit Funds</div>
+            <img src="logo.png" id="appLogoLogin" alt="AK Chit Funds" style="width:56px;height:56px;border-radius:14px;object-fit:cover;margin-bottom:12px;">
+            <div class="login-brand-title" id="appBrandTitle">AK Chit Funds</div>
             <div class="login-brand-sub">☁ CLOUD &nbsp;·&nbsp; Chit Fund Management</div>
         </div>
 
@@ -81,10 +81,10 @@
     <div id="adminHeader" class="app-header">
         <div class="brand-wrap">
             <div class="brand-logo">
-                <img src="logo.png" alt="AK Chit Funds" style="width:46px;height:46px;border-radius:10px;object-fit:cover;">
+                <img src="logo.png" id="appLogoHeader" alt="AK Chit Funds" style="width:46px;height:46px;border-radius:10px;object-fit:cover;">
             </div>
             <div class="brand-text">
-                <div class="brand-name">AK Chit Funds <span class="brand-cloud">☁ CLOUD</span></div>
+                <div class="brand-name" id="appBrandName">AK Chit Funds <span class="brand-cloud" id="appBrandCloud">☁ CLOUD</span></div>
                 <div class="brand-sub">Chit Fund Management</div>
             </div>
         </div>
@@ -152,9 +152,10 @@
         </div>
 
         <!-- Admin-only quick action buttons — hidden by default, shown via JS for admin -->
-        <div id="adminQuickBtns" style="display:none;gap:8px;margin-top:8px;">
+        <div id="adminQuickBtns" style="display:none;gap:8px;margin-top:8px;flex-wrap:wrap;">
             <button class="btn btn-outline-warning w-100 fw-bold" style="padding:12px 8px;font-size:0.88rem;border-radius:14px;" onclick="openAddMember()">👤 Create Member</button>
             <button class="btn btn-outline-success w-100 fw-bold" style="padding:12px 8px;font-size:0.88rem;border-radius:14px;" onclick="openAddGroup()">🏦 New Group</button>
+            <button class="btn w-100 fw-bold" style="flex:1 1 100%;padding:12px 8px;font-size:0.88rem;border-radius:14px;background:rgba(37,211,102,0.12);border:1px solid rgba(37,211,102,0.45);color:#25D366;" onclick="openAckQueue()">💬 WhatsApp Acknowledgements <span id="ackQueueCount" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 8px;font-size:0.75rem;margin-left:4px;">0</span></button>
         </div>
 
         <div id="adminMemberSearch" class="my-3" style="background:var(--card-bg);border-radius:18px;border:1px solid var(--border);padding:14px;">
@@ -342,25 +343,36 @@
                             <label class="form-label-small" style="margin-bottom:0;">Custom Template <span style="color:var(--text-dim);font-weight:400;">(optional)</span></label>
                             <button onclick="document.getElementById('wa_template').value='';waAutoSave();" style="background:none;border:none;color:var(--text-dim);font-size:0.65rem;cursor:pointer;padding:0;">Clear</button>
                         </div>
-                        <textarea id="wa_template" class="form-input" rows="5" style="margin-bottom:4px;font-size:0.75rem;font-family:monospace;resize:vertical;" placeholder="Leave blank for default message. Use [memberName], [groupName], [balance] etc." oninput="waAutoSave()"></textarea>
+                        <textarea id="wa_template" class="form-input" rows="5" style="margin-bottom:4px;font-size:0.75rem;font-family:monospace;resize:vertical;" placeholder="Leave blank for default message. Use [memberName], [groupName], [balance], [paidMonths], etc." oninput="waAutoSave()"></textarea>
                         <div style="font-size:0.6rem;color:var(--text-dim);line-height:1.8;">
                             <span style="color:#a5b4fc;font-weight:700;">Member:</span>
                             <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[memberName]</span>
                             <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[memberPhone]</span>
-                            <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[balance]</span>
-                            <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[totalPaid]</span>
+                            <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[memberId]</span>
                             <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[contact]</span><br>
-                            <span style="color:#34d399;font-weight:700;">Group:</span>
-                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[groupName]</span>
-                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[allGroups]</span>
-                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[groupLines]</span>
+                            <span style="color:#34d399;font-weight:700;">Financial:</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[totalPaid]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[balance]</span>
                             <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[monthlyAmount]</span>
-                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[nextDueDate]</span><br>
-                            <span style="color:#f59e0b;font-weight:700;">Progress:</span>
-                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[installmentsCompleted]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[totalBalance]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[dueAmount]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[chitValue]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[lastPaidAmount]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[lastPaidDate]</span><br>
+                            <span style="color:#10b981;font-weight:700;">Group:</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[groupName]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[allGroups]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[nextDueDate]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[dueDay]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[daysUntilDue]</span><br>
+                            <span style="color:#f59e0b;font-weight:700;">Progress & Timeline:</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[paidMonths]</span>
                             <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[totalMonths]</span>
                             <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[monthsRemaining]</span>
-                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[completionPercentage]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[progressPercent]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[startDate]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[endDate]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[todayDate]</span>
                         </div>
                     </div>
 
@@ -569,10 +581,10 @@
         <!-- ── Statistics Sub-tab ── -->
         <div id="bkStatsPanel">
 
-            <!-- Filters: 2x2 grid, member is dropdown filtered by group -->
+            <!-- Filters: 2x3 grid, member is dropdown filtered by group -->
             <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px;">
                 <div style="font-size:0.65rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🔍 Filters</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
                     <div>
                         <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">🏦 Group</label>
                         <select id="statGroupFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="onStatGroupFilterChange()">
@@ -583,6 +595,12 @@
                         <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">👤 Member</label>
                         <select id="statMemberFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="applyStatSubFilter()">
                             <option value="">All Members</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">📅 Month</label>
+                        <select id="statMonthFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="applyStatSubFilter()">
+                            <option value="">All Months</option>
                         </select>
                     </div>
                     <div>
@@ -611,6 +629,7 @@
             <input type="hidden" id="sfActiveMode">
             <input type="hidden" id="sfActiveChit">
             <input type="hidden" id="sfActiveMember">
+            <input type="hidden" id="sfActiveMonth">
             <div style="display:none">
                 <select id="statFilterType"></select>
                 <div id="statSubFilterWrap"><div id="sfGroup"></div><div id="sfMode"></div><div id="sfChit"></div><div id="sfMember"></div></div>
@@ -874,8 +893,9 @@
         </div>
 
         <!-- Total chit ref bar -->
-        <div id="totalChitRef" style="display:none;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:0.82rem;display:flex;gap:16px;">
+        <div id="totalChitRef" style="display:none;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:0.82rem;flex-wrap:wrap;gap:6px 16px;">
             <span style="color:var(--text-dim);">Total: <span id="totalChitVal" style="color:#a5b4fc;font-weight:700;"></span></span>
+            <span id="prevPaidWrap" style="color:var(--text-dim);display:none;">Already paid: <span id="prevPaidVal" style="color:#34d399;font-weight:700;"></span></span>
             <span style="color:var(--text-dim);">Balance: <span id="totalBalVal" style="color:#f59e0b;font-weight:700;"></span></span>
         </div>
 
@@ -1058,16 +1078,18 @@
 <!-- ══ END BOTTOM NAV BAR ════════════════════════════════════════════════════ -->
 
 <!-- Scripts — load in dependency order -->
+<script src="js/config.js"></script>
 <script src="js/firebase.js?v=20260610_v1"></script>
-<script src="js/helpers.js?v=20260610_v1"></script>
-<script src="js/ui.js?v=20260614_v7"></script>
-<script src="js/ledger.js?v=20260619_v4"></script>
+<script src="js/helpers.js?v=20260619_v2"></script>
+<script src="js/ui.js?v=20260717_v8"></script>
+<script src="js/ledger.js?v=20260619_v6"></script>
 <script src="js/members.js?v=20260610_v1"></script>
-<script src="js/groups.js?v=20260610_v1"></script>
-<script src="js/payments.js?v=20260613_v7"></script>
-<script src="js/backup.js?v=20260614_v5"></script>
+<script src="js/groups.js?v=20260717_v2"></script>
+<script src="js/payments.js?v=20261013_v9"></script>
+<script src="js/acks.js?v=20261013_v1"></script>
+<script src="js/backup.js?v=20260717_v6"></script>
 <script src="js/planner.js?v=20260613_v2"></script>
-<script src="js/print.js?v=20260610_v1"></script>
+<script src="js/print.js?v=20261013_v4"></script>
 <script src="js/auth.js?v=20260614_v4"></script>
 <script src="js/quickview.js?v=20260610_v1"></script>
 <script src="js/qr.js?v=20260613_v3"></script>
