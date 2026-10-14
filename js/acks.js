@@ -150,16 +150,28 @@ async function renderAckList(){
             ? '<span style="background:#d1fae5;color:#065f46;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:800;">🏆 Chit picked</span>'
             : '<span style="background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:800;">💳 Payment</span>';
         const isPending=_ackFilter==='pending';
+
+        // Build the message up-front and use a REAL link, so the browser never blocks the WhatsApp tab
+        let href='', err='';
+        try{
+            const msg=kind==='chit'?buildChitAckMessage(m,g,p):buildPaymentAckMessage(m,g,p);
+            if(phone) href='https://wa.me/'+phone+'?text='+encodeURIComponent(msg);
+        }catch(e){ console.error('Ack message error:',e); err=e.message||'message error'; }
+
+        const btnBase='flex:1;border-radius:10px;padding:8px;font-size:0.85rem;font-weight:700;text-align:center;text-decoration:none;display:block;';
+        const sendBtn = href
+            ? `<a href="${href}" target="_blank" rel="noopener" onclick="${isPending?`markAckSent('${p.id}','${kind}')`:''}" style="${btnBase}background:#25D366;color:#fff;">💬 ${isPending?'Send':'Resend'}</a>`
+            : `<span style="${btnBase}background:#25D366;color:#fff;opacity:.4;">💬 Send</span>`;
         return `<div style="background:var(--input-bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:8px;">
             <div style="display:flex;align-items:center;gap:8px;">
                 <div style="flex:1;min-width:0;">
                     <div style="font-weight:800;font-size:0.92rem;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_ackEsc(m.name)} ${badge}</div>
                     <div style="font-size:0.76rem;color:var(--text-dim);">${_ackEsc(g.name)}${months?' · '+_ackEsc(months):''}</div>
-                    <div style="font-size:0.76rem;color:var(--text-dim);">${fmtDate(p.date)} · <b style="color:#34d399;">${fmtAmt(p.paid)}</b>${phone?'':' · <span style="color:#f87171;">No phone</span>'}</div>
+                    <div style="font-size:0.76rem;color:var(--text-dim);">${fmtDate(p.date)} · <b style="color:#34d399;">${fmtAmt(p.paid)}</b>${phone?'':' · <span style="color:#f87171;">No phone</span>'}${err?` · <span style="color:#f87171;">${_ackEsc(err)}</span>`:''}</div>
                 </div>
             </div>
-            <div style="display:flex;gap:6px;margin-top:8px;">
-                <button type="button" ${phone?'':'disabled'} onclick="sendAck('${p.id}','${kind}')" class="btn fw-bold" style="flex:1;border-radius:10px;padding:8px;font-size:0.85rem;background:#25D366;border:none;color:#fff;${phone?'':'opacity:.4;'}">💬 ${isPending?'Send':'Resend'}</button>
+            <div style="display:flex;gap:6px;margin-top:8px;align-items:stretch;">
+                ${sendBtn}
                 ${isPending?`<button type="button" onclick="skipAck('${p.id}','${kind}')" class="btn fw-bold" style="border-radius:10px;padding:8px 12px;font-size:0.8rem;background:var(--input-bg);border:1px solid var(--border);color:var(--text-dim);">Skip</button>`:''}
             </div>
         </div>`;
@@ -172,26 +184,14 @@ async function _ackSetStatus(pid,kind,status){
     bustCache('payments');
 }
 
-async function sendAck(pid,kind){
+// Called when the Send link is clicked (the link itself opens WhatsApp)
+async function markAckSent(pid,kind){
     try{
-        const ps=await getCollection('payments');
-        const p=ps.find(x=>x.id===pid); if(!p) return;
-        const [ms,gs]=await Promise.all([getCollection('members'),getCollection('groups')]);
-        const m=ms.find(x=>x.id===p.memberId), g=gs.find(x=>x.id===p.groupId);
-        if(!m||!g) return;
-        const phone=_ackPhone(m);
-        if(!phone){ showToast('❌ No phone number saved for this member',false); return; }
-        const msg=kind==='chit'?buildChitAckMessage(m,g,p):buildPaymentAckMessage(m,g,p);
-        // Open WhatsApp first (must happen inside the click so popup blockers allow it)
-        window.open('https://wa.me/'+phone+'?text='+encodeURIComponent(msg),'_blank');
-        if(_ackFilter==='pending'){
-            await _ackSetStatus(pid,kind,'sent');
-            await renderAckList();
-            refreshAckBadge();
-        }
+        await _ackSetStatus(pid,kind,'sent');
+        setTimeout(()=>{ renderAckList(); refreshAckBadge(); },600);
     }catch(err){
-        console.error('Ack send error:',err);
-        showToast('❌ Could not open WhatsApp',false);
+        console.error('Ack status error:',err);
+        showToast('⚠️ Opened WhatsApp, but could not mark as sent: '+(err.message||err),false);
     }
 }
 
