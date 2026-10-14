@@ -16,6 +16,17 @@ function _ackPhone(m){
     return ph;
 }
 
+// Self-contained payment-mode label (does not depend on other scripts)
+function _ackPaidBy(v){
+    if(!v) return '';
+    const m=String(v).toLowerCase();
+    if(m.includes('phone')||m.includes('pe')) return 'Phone Pe';
+    if(m.includes('gpay')) return 'Gpay';
+    if(m.includes('bank')) return 'Bank';
+    if(m.includes('cash')) return 'Cash';
+    return String(v);
+}
+
 function _ackMonthLabels(g, p, full){
     const due=getGroupDueDates(g)||[];
     const slots=(Array.isArray(p.monthSlots)&&p.monthSlots.length)?p.monthSlots:(p.monthSlot!=null?[p.monthSlot]:[]);
@@ -46,7 +57,7 @@ function buildPaymentAckMessage(m,g,p){
     if(months.length) L.push(`${months.length>1?'Months':'Month'}: ${months.join(', ')}`);
     L.push(`Payment date: ${fmtDate(p.date)}`);
     L.push(`Amount received: ${fmtAmt(paid)}`);
-    if(p.paidBy) L.push(`Mode: ${normalizePaidBy(p.paidBy)}`);
+    if(p.paidBy) L.push(`Mode: ${_ackPaidBy(p.paidBy)}`);
     if(chitDue>0) L.push(`Chit amount due: ${fmtAmt(chitDue)}`);
     L.push(bal>0 ? `Balance pending: ${fmtAmt(bal)}` : 'Status: Paid in full');
     L.push('');
