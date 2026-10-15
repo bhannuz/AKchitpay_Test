@@ -178,7 +178,7 @@ function buildAckMessage(kind,m,g,p,allPays){
 }
 
 // ═══════════════ STATEMENT PDF ═══════════════
-function _ackBuildStatementPdf(m,g,p,allPays){
+function _ackBuildStatementPdfSimple(m,g,p,allPays){
     const jsPDF=window.jspdf&&window.jspdf.jsPDF;
     if(!jsPDF) throw new Error('PDF library not loaded');
     const sn=Number(p.slotNum||1), eid=p.enrollmentId||'';
@@ -284,6 +284,83 @@ function _ackBuildStatementPdf(m,g,p,allPays){
     const blob=doc.output('blob');
     const file=new File([blob],name,{type:'application/pdf'});
     return {file,url:URL.createObjectURL(blob)};
+}
+
+// Wait for images inside an element (e.g. the logo) so they are in the capture
+function _ackWaitImages(el,ms){
+    const imgs=Array.from(el.querySelectorAll('img')).filter(i=>!i.complete);
+    if(!imgs.length) return Promise.resolve();
+    return Promise.race([
+        Promise.all(imgs.map(i=>new Promise(r=>{ i.onload=i.onerror=r; }))),
+        new Promise(r=>setTimeout(r,ms))
+    ]);
+}
+
+// Builds the PDF from the SAME statement HTML the ledger "Print" uses, so both look identical
+async function _ackBuildStatementPdf(m,g,p,allPays){
+    try{
+        if(typeof printMemberStatement!=='function') throw new Error('print module missing');
+        if(!window.html2canvas) throw new Error('html2canvas not loaded');
+        const jsPDF=window.jspdf&&window.jspdf.jsPDF; if(!jsPDF) throw new Error('PDF library not loaded');
+        const html=await printMemberStatement(m.id,{returnHtml:true,silent:true});
+        if(!html) throw new Error('statement not available');
+
+        // A4 content width (190mm = 718px at 96dpi) -> same scale as the browser print
+        const host=document.createElement('div');
+        host.style.cssText='position:fixed;left:-12000px;top:0;width:718px;background:#fff;';
+        host.innerHTML=html;
+        const bar=host.querySelector('.print-btn-bar'); if(bar) bar.remove();
+        document.body.appendChild(host);
+        try{
+            const el=host.querySelector('#printStatement');
+            el.style.cssText+=';max-width:none;width:718px;box-sizing:border-box;padding:6px;margin:0;';
+            await _ackWaitImages(el,2000);
+            const scale=2;
+            const canvas=await html2canvas(el,{scale,backgroundColor:'#ffffff',useCORS:true,logging:false});
+            const top0=el.getBoundingClientRect().top;
+            // Row / block bottoms are used as page-break points so rows are never cut in half
+            const breaks=Array.from(el.querySelectorAll('tr,.mbox,.sec-title,.hdr'))
+                .map(n=>Math.round((n.getBoundingClientRect().bottom-top0)*scale))
+                .filter(v=>v>0).sort((a,b)=>a-b);
+            const pdf=_ackPaginate(canvas,breaks,jsPDF);
+            const safe=s=>String(s||'').replace(/[^A-Za-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+            const name=`Statement_${safe(m.name)}_${new Date().toISOString().split('T')[0]}.pdf`;
+            const blob=pdf.output('blob');
+            return {file:new File([blob],name,{type:'application/pdf'}),url:URL.createObjectURL(blob)};
+        }finally{ host.remove(); }
+    }catch(err){
+        console.warn('Print-format statement failed, using simple statement:',err);
+        const res=_ackBuildStatementPdfSimple(m,g,p,allPays);
+        res.fallback=true;
+        return res;
+    }
+}
+
+// Cuts the tall canvas into A4 pages (12mm top/bottom, 10mm sides) at row boundaries
+function _ackPaginate(canvas,breaks,jsPDF){
+    const pdf=new jsPDF({unit:'mm',format:'a4'});
+    const PW=210, PH=297, MX=10, MY=12;
+    const contentW=PW-2*MX, contentH=PH-2*MY;
+    const pxPerMm=canvas.width/contentW;
+    const pageHpx=Math.floor(contentH*pxPerMm);
+    let y=0, first=true;
+    while(y<canvas.height-2){
+        let end=Math.min(canvas.height,y+pageHpx);
+        if(end<canvas.height){
+            const cand=breaks.filter(b=>b>y+pageHpx*0.4&&b<=end);
+            if(cand.length) end=cand[cand.length-1];
+        }
+        const h=end-y;
+        const slice=document.createElement('canvas');
+        slice.width=canvas.width; slice.height=h;
+        const ctx=slice.getContext('2d');
+        ctx.fillStyle='#fff'; ctx.fillRect(0,0,slice.width,slice.height);
+        ctx.drawImage(canvas,0,y,canvas.width,h,0,0,canvas.width,h);
+        if(!first) pdf.addPage();
+        pdf.addImage(slice.toDataURL('image/jpeg',0.92),'JPEG',MX,MY,contentW,h/pxPerMm);
+        first=false; y=end;
+    }
+    return pdf;
 }
 
 // ═══════════════ QUEUE DATA ═══════════════
@@ -472,12 +549,12 @@ async function openAckEditor(pid,kind){
         try{
             st.textContent='Preparing statement…';
             const allPays=await getCollection('payments');
-            const res=_ackBuildStatementPdf(m,g,p,allPays);
+            const res=await _ackBuildStatementPdf(m,g,p,allPays);
             if(!document.getElementById('ackEditorModal')){ URL.revokeObjectURL(res.url); return; }
             _ackPdf=res;
             view.href=res.url;
             view.style.display=cb.checked?'inline':'none';
-            st.textContent=cb.checked?('Ready: '+res.file.name):'';
+            st.textContent=cb.checked?('Ready: '+res.file.name+(res.fallback?' (simple layout)':'')):'';
         }catch(e){
             console.error('Statement PDF error:',e);
             st.innerHTML='<span style="color:#f87171;">Statement could not be prepared: '+_ackEsc(e.message||e)+'</span>';
