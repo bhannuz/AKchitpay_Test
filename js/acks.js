@@ -64,7 +64,7 @@ Month(s): {months}
 Payment date: {date}
 Amount received: {amount}
 Mode: {mode}
-Chit amount due: {chitDue}
+Balance amount: {balance}
 Status: {status}
 
 {note}
@@ -117,7 +117,38 @@ function _ackFill(tpl,vars){
     return out.replace(/\n{3,}/g,'\n\n').trim();
 }
 
-function _ackVars(kind,m,g,p){
+// Balance still pending for the month(s) this payment covers, counting every earlier
+// part-payment of those months (and this one). Falls back to the saved value.
+function _ackBalanceAfter(g,p,allPays){
+    try{
+        if(!Array.isArray(allPays)) throw 0;
+        const dues=getGroupDueDates(g)||[];
+        const sn=Number(p.slotNum||1), eid=p.enrollmentId||'';
+        const same=allPays.filter(x=>x.memberId===p.memberId&&x.groupId===p.groupId
+            && (!eid||!x.enrollmentId||x.enrollmentId===eid)
+            && Number(x.slotNum||1)===sn);
+        const key=x=>(x.date||'')+'|'+(x.id||'');
+        const upto=same.filter(x=>key(x)<=key(p));
+        const members=parseInt(g.members||g.gMembers||0), amount=parseFloat(g.amount||g.gAmount||0);
+        const chit=parseFloat(p.chit)>0?parseFloat(p.chit):(members>0&&amount>0?Math.round(amount/members):0);
+        const slotsOf=x=>(Array.isArray(x.monthSlots)&&x.monthSlots.length)?x.monthSlots:null;
+        const share=x=>(parseFloat(x.paid)||0)/(slotsOf(x)?slotsOf(x).length:1);
+        const inMonth=(x,i)=>Array.isArray(x.monthSlots)?x.monthSlots.includes(i):(x.monthSlot!=null?x.monthSlot===i:getMonthSlot(dues,x.date)===i);
+        let months=_ackSlots(p);
+        if(!months.length){ const i=getMonthSlot(dues,p.date); months=i>=0?[i]:[]; }
+        if(!months.length||!chit) throw 0;
+        let bal=0;
+        months.forEach(i=>{
+            const paid=upto.filter(x=>inMonth(x,i)).reduce((s,x)=>s+share(x),0);
+            bal+=Math.max(0,chit-paid);
+        });
+        return Math.round(bal);
+    }catch(e){
+        return Math.max(0,parseFloat(p.balance)||0);
+    }
+}
+
+function _ackVars(kind,m,g,p,allPays){
     if(kind==='chit'){
         return {
             name:m.name||'Member', group:g.name||'',
@@ -128,7 +159,7 @@ function _ackVars(kind,m,g,p){
     }
     const nMonths=parseInt(p.numMonths)||1;
     const chitDue=(parseFloat(p.chit)||0)*nMonths;
-    const bal=Math.max(0,parseFloat(p.balance)||0);
+    const bal=_ackBalanceAfter(g,p,allPays);
     return {
         name:m.name||'Member', group:g.name||'',
         months:_ackMonthLabels(g,p,false).join(', '),
@@ -142,8 +173,8 @@ function _ackVars(kind,m,g,p){
     };
 }
 
-function buildAckMessage(kind,m,g,p){
-    return _ackFill(_ackGetTpl(kind),_ackVars(kind,m,g,p));
+function buildAckMessage(kind,m,g,p,allPays){
+    return _ackFill(_ackGetTpl(kind),_ackVars(kind,m,g,p,allPays));
 }
 
 // ═══════════════ STATEMENT PDF ═══════════════
@@ -262,8 +293,8 @@ async function _ackItems(){
     ps.forEach(p=>{
         const m=ms.find(x=>x.id===p.memberId), g=gs.find(x=>x.id===p.groupId);
         if(!m||!g) return;
-        if(p.ackPay)  items.push({kind:'pay', status:p.ackPay, p,m,g});
-        if(p.ackChit) items.push({kind:'chit',status:p.ackChit,p,m,g});
+        if(p.ackPay)  items.push({kind:'pay', status:p.ackPay, p,m,g,allPays:ps});
+        if(p.ackChit) items.push({kind:'chit',status:p.ackChit,p,m,g,allPays:ps});
     });
     items.sort((a,b)=>((b.p.date||'')+b.p.id).localeCompare((a.p.date||'')+a.p.id));
     return items;
@@ -330,7 +361,7 @@ async function renderAckList(){
             : '<span style="background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:800;">💳 Payment</span>';
         let quick='', err='';
         try{
-            const msg=buildAckMessage(kind,m,g,p);
+            const msg=buildAckMessage(kind,m,g,p,it.allPays);
             if(phone) quick='https://wa.me/'+phone+'?text='+encodeURIComponent(msg);
         }catch(e){ console.error('Ack message error:',e); err=e.message||'message error'; }
         const mainBtn=`<button type="button" ${phone?'':'disabled'} onclick="openAckEditor('${p.id}','${kind}')" class="btn fw-bold" style="flex:1;border-radius:10px;padding:8px;font-size:0.85rem;background:#25D366;border:none;color:#fff;${phone?'':'opacity:.4;'}">✏️ Review &amp; Send ${isPending?'':'again'}</button>`;
@@ -422,11 +453,11 @@ async function openAckEditor(pid,kind){
     const st=document.getElementById('ackPdfStatus');
     const view=document.getElementById('ackViewPdf');
     const sendBtn=document.getElementById('ackEditSend');
-    ta.value=buildAckMessage(kind,m,g,p);
+    ta.value=buildAckMessage(kind,m,g,p,it.allPays);
     if(cb.checked) _ackSyncStmtLine(ta,true);
 
     document.getElementById('ackResetText').onclick=()=>{
-        ta.value=buildAckMessage(kind,m,g,p);
+        ta.value=buildAckMessage(kind,m,g,p,it.allPays);
         if(cb.checked) _ackSyncStmtLine(ta,true);
     };
     cb.onchange=()=>{
