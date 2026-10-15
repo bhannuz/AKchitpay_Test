@@ -445,6 +445,7 @@ function openPaymentModal(){
     if(!isAdmin()){showToast('\ud83d\udeab Access denied',false);return;}
     resetPaymentForm();
     openModal('paymentModal');
+    const _pb=document.querySelector('#paymentModal .pm-body'); if(_pb) _pb.scrollTop=0;
 }
 
 async function linkGroupForPayment(){
