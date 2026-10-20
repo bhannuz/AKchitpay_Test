@@ -176,7 +176,17 @@ async function renderCollectionsTab(){
         const totalReceived = gPays.reduce((s,p)=>s+(parseFloat(p.paid)||0),0);
         const elapsed = allDD.filter(d=>d<=todayStr).length;
         const totalPayout = allDD.reduce((s,_,idx)=>s+(payouts[g.id+'_'+idx]||0),0);
-        const totalBalance = totalReceived - totalPayout;
+        
+        // Calculate total commitment: all members × all months × monthly amount
+        // BUGFIX: g.monthly / g.gMonthly are never actually saved on a group (only
+        // g.fixedAmt is), so this was silently evaluating to 0 for every fixed-amount
+        // group — which broke totalCommitment/totalBalance below AND meant the
+        // "did this member actually pay in full" check further down always fell back
+        // to its loose behavior (any payment > 0 counted as fully paid). Falling back
+        // to fixedAmt fixes both.
+        const monthlyAmount = fixedAmt>0 ? fixedAmt : parseFloat(g.monthly||g.gMonthly||0);
+        const totalCommitment = totalSlots * totalMonths * monthlyAmount;
+        const totalBalance = Math.max(0, totalCommitment - totalReceived);
 
         const rows = allDD.map((dueDate, idx)=>{
             const slotPays = gPays.filter(p=>{
@@ -189,10 +199,9 @@ async function renderCollectionsTab(){
             // If member with 3 chits pays, count as 3 payments
             let membersPaidThisMonth = 0;
             expandedSlots.forEach(({m, slotNum, totalSlots}) => {
-                // Find if this member paid for this month
-                const hasPaid = slotPays.some(p => {
+                // Find this member's payment(s) toward this slot for this month
+                const memberSlotPays = slotPays.filter(p => {
                     if(p.memberId !== m.id) return false;
-                    // Check if payment matches this slot
                     if(m.enrollments && m.enrollments.length > 0) {
                         const enr = m.enrollments.find(e => e.groupId === g.id);
                         if(enr && enr.enrollmentId && p.enrollmentId) {
@@ -202,6 +211,25 @@ async function renderCollectionsTab(){
                     if(p.slotNum != null) return p.slotNum === slotNum;
                     return slotNum === 1;  // Default to first slot if no slot info
                 });
+                // BUGFIX: a payment *record* existing for this month isn't proof the month
+                // is paid — a member can pay only part of what's due (e.g. ₹11,000 toward a
+                // ₹23,077 month) and still have a record. Sum what they've actually paid
+                // toward this specific month (using the per-month share for payments that
+                // span several months) and only count them as paid once that total meets
+                // the full amount due, so partially-paid members no longer count toward
+                // "all members paid" / the Settled status.
+                const paidForThisMonth = memberSlotPays.reduce((s,p) => {
+                    const perMonth = p.numMonths && p.numMonths>1 ? (parseFloat(p.paidPerMonth)||0) : (parseFloat(p.paid)||0);
+                    return s + perMonth;
+                }, 0);
+                // For variable-amount groups (monthlyAmount is 0), fall back to the amount
+                // recorded directly on the member's own payment (each payment stores its
+                // own `chit` due amount) since there's no single group-wide monthly figure.
+                const dueForThisMonth = monthlyAmount>0 ? monthlyAmount : memberSlotPays.reduce((mx,p) => {
+                    const perMonth = p.numMonths && p.numMonths>1 ? (parseFloat(p.chit)||0)/p.numMonths : (parseFloat(p.chit)||0);
+                    return Math.max(mx, perMonth);
+                }, 0);
+                const hasPaid = paidForThisMonth>0 && dueForThisMonth>0 && paidForThisMonth >= (dueForThisMonth - 0.5);
                 if(hasPaid) membersPaidThisMonth++;
             });
             
@@ -210,15 +238,21 @@ async function renderCollectionsTab(){
                 const perMonth = p.numMonths&&p.numMonths>1 ? (parseFloat(p.paidPerMonth)||0) : (parseFloat(p.paid)||0);
                 return s + perMonth;
             },0);
+            const monthlyCommitment = totalSlots * monthlyAmount;
             const payout    = payouts[g.id+'_'+idx]||0;
-            const balance   = received - payout;
+            const balance   = Math.max(0, monthlyCommitment - received);
             const isPast    = dueDate < todayStr;
             const isToday   = dueDate === todayStr;
             const isFuture  = dueDate > todayStr;
-            const status    = received===0&&isFuture ? 'upcoming'
+            // "Settled" (full) must strictly require every member/slot to have paid — a
+            // month's total received amount matching the commitment isn't enough proof
+            // on its own, since that total could come from uneven contributions (some
+            // members overpaying while others haven't paid at all). So this status is
+            // only ever derived from the per-member paid count, not from aggregate money.
+            const status    = membersPaidThisMonth>0&&membersPaidThisMonth===totalSlots ? 'full'
+                            : received===0&&isFuture ? 'upcoming'
                             : received===0&&(isPast||isToday) ? 'overdue'
                             : balance<0 ? 'deficit'
-                            : payout>0&&balance===0 ? 'full'
                             : received>0&&payout===0 ? 'received'
                             : received>0 ? 'partial' : 'upcoming';
             const statusBadge = status==='full'     ? '<span style="background:rgba(16,185,129,0.15);color:#34d399;font-size:0.6rem;font-weight:800;padding:2px 8px;border-radius:99px;">✅ Settled</span>'
@@ -260,7 +294,6 @@ async function renderCollectionsTab(){
                     <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;">
                         <span style="font-size:0.68rem;color:#34d399;">Rcvd: ${fmtAmt(totalReceived)}</span>
                         <span style="font-size:0.68rem;color:#a5b4fc;">Paid out: ${fmtAmt(totalPayout)}</span>
-                        <span style="font-size:0.68rem;color:${balColor};">Bal: ${totalBalance!==0?(totalBalance>0?'+':'')+fmtAmt(Math.abs(totalBalance)):'—'}</span>
                         <span style="font-size:0.68rem;color:var(--text-dim);">${elapsed}/${totalMonths} mo</span>
                     </div>
                 </div>
@@ -358,9 +391,25 @@ async function renderGroupsTab(){
         const gMs=ms.filter(m=>(m.enrollments||[]).some(e=>e.groupId===g.id)||(m.groupIds||[]).includes(g.id));
         const gPays=ps.filter(p=>p.groupId===g.id);
         const tPaid=gPays.reduce((s,p)=>s+(parseFloat(p.paid)||0),0);
-        const tBal=gPays.reduce((s,p)=>s+(parseFloat(p.balance)||0),0);
-        const picked=gPays.filter(p=>p.chitPicked==='Yes').length;
+        
+        // Calculate total balance: total commitment - total paid
         const totalMonths=parseInt(g.duration||g.gDuration)||21;
+        // BUGFIX: same as the collection view above — g.monthly/g.gMonthly are never
+        // actually saved, so fall back to g.fixedAmt (the field that is saved) for
+        // fixed-amount groups, otherwise this always silently evaluated to 0.
+        const gFixedAmt = g.amtType!=='variable'&&g.fixedAmt ? parseFloat(g.fixedAmt)||0 : 0;
+        const monthlyAmount = gFixedAmt>0 ? gFixedAmt : (parseFloat(g.monthly||g.gMonthly)||0);
+        // Count total slots (members with multiple chits count as multiple slots)
+        let totalSlots = 0;
+        gMs.forEach(m => {
+            const enr = (m.enrollments||[]).find(e => e.groupId === g.id);
+            const qty = enr ? parseInt(enr.qty||1) : 1;
+            totalSlots += qty;
+        });
+        const totalCommitment = totalSlots * totalMonths * monthlyAmount;
+        const tBal = Math.max(0, totalCommitment - tPaid);
+        
+        const picked=gPays.filter(p=>p.chitPicked==='Yes').length;
         let elapsed=0;
         if(g.startDate||g.gStart){const _s=new Date(g.startDate||g.gStart),_n=new Date();elapsed=Math.max(0,Math.min(totalMonths,(_n.getFullYear()-_s.getFullYear())*12+(_n.getMonth()-_s.getMonth())+1));}
         const left=Math.max(0,totalMonths-elapsed);const pct=Math.min(100,Math.round(elapsed/totalMonths*100));
@@ -383,7 +432,6 @@ async function renderGroupsTab(){
                 for(let q=0;q<qty;q++) expandedSlots.push({m, slotNum:q+1, totalSlots:qty, isJoint:false, coM:null, coMid:''});
             }
         });
-        const totalSlots = expandedSlots.length;
         const todayStr = new Date().toISOString().split('T')[0];
 
         // ── Per-group member sort
@@ -459,48 +507,48 @@ async function renderGroupsTab(){
             const pickedPay = [...mp,...coMp].find(p=>p.chitPicked==='Yes');
             const pickedAmt = pickedPay?(parseFloat(pickedPay.chit)||0)*(parseInt(pickedPay.numMonths)||1):0;
             const pickedBy  = pickedPay&&pickedPay.chitPickedBy?pickedPay.chitPickedBy:'';
-            const multiChitBadge = totalSlots>1?`<span style="background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.4);color:#fbbf24;border-radius:5px;padding:1px 6px;font-size:0.98rem;font-weight:800;margin-left:4px;">x${totalSlots} chits</span>`:'';
-            const slotLabelBadge = totalSlots>1?`<span style="font-size:0.98rem;color:#f59e0b;"> (Chit ${slotNum})</span>`:'';
+            const multiChitBadge = totalSlots>1?`<span style="background:rgba(245,158,11,0.2);border:1px solid rgba(245,158,11,0.4);color:#fbbf24;border-radius:4px;padding:0px 4px;font-size:0.66rem;font-weight:800;margin-left:3px;">x${totalSlots}</span>`:'';
+            const slotLabelBadge = totalSlots>1?`<span style="font-size:0.66rem;color:#f59e0b;"> (C${slotNum})</span>`:'';
 
             // ── Name cell ────────────────────────────────────────────────────
             const nameCell = isJoint && coM
                 ? `<td>
-                    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
-                        <strong>${m.name}</strong>
-                        <span style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:5px;padding:1px 6px;font-size:0.7rem;font-weight:800;">&#x1f465; Joint</span>
+                    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                        <strong style="font-size:0.75rem;">${m.name}</strong>
+                        <span style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;border-radius:4px;padding:0px 4px;font-size:0.62rem;font-weight:800;">Joint</span>
                         ${multiChitBadge}${slotLabelBadge}
                     </div>
-                    <div style="font-size:0.75rem;color:var(--text-dim);">${m.phone||''}</div>
-                    <div style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(99,102,241,0.2);">
-                        <strong style="font-size:0.88rem;color:#c4b5fd;">${coM.name}</strong>
-                        <span style="font-size:0.72rem;color:var(--text-dim);"> · ${coM.phone||''}</span>
+                    <div style="font-size:0.66rem;color:var(--text-dim);">${m.phone||''}</div>
+                    <div style="margin-top:2px;padding-top:2px;border-top:1px solid rgba(99,102,241,0.2);">
+                        <strong style="font-size:0.72rem;color:#c4b5fd;">${coM.name}</strong>
+                        <span style="font-size:0.62rem;color:var(--text-dim);"> · ${coM.phone||''}</span>
                     </div>
                   </td>`
-                : `<td><strong>${m.name}</strong>${multiChitBadge}${slotLabelBadge}<br><span style="font-size:0.92rem;color:var(--text-dim);">${m.phone||''}</span></td>`;
+                : `<td><strong style="font-size:0.75rem;">${m.name}</strong>${multiChitBadge}${slotLabelBadge}<br><span style="font-size:0.66rem;color:var(--text-dim);">${m.phone||''}</span></td>`;
 
             // ── Paid cell — stacked P1 / P2 for joint ───────────────────────
             const paidCell = isJoint && coM
                 ? `<td>
-                    <div style="color:#34d399;font-weight:700;">${fmtAmt(myPaid)}</div>
-                    <div style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(99,102,241,0.15);color:${coPaid>0?'#34d399':'#f87171'};font-weight:700;">${coPaid>0?fmtAmt(coPaid):'Pending'}</div>
+                    <div style="color:#34d399;font-weight:700;font-size:0.72rem;">${fmtAmt(myPaid)}</div>
+                    <div style="margin-top:2px;padding-top:2px;border-top:1px solid rgba(99,102,241,0.15);color:${coPaid>0?'#34d399':'#f87171'};font-weight:700;font-size:0.72rem;">${coPaid>0?fmtAmt(coPaid):'Pending'}</div>
                   </td>`
-                : `<td style="color:#34d399;">${fmtAmt(paid)}</td>`;
+                : `<td style="color:#34d399;font-size:0.75rem;">${fmtAmt(paid)}</td>`;
 
             // ── Balance cell — single combined balance ───────────────────────
-            const balCell = `<td style="color:${bal>0?'#f59e0b':'#34d399'};font-weight:700;">${bal>0?fmtAmt(bal):'—'}</td>`;
+            const balCell = `<td style="color:${bal>0?'#f59e0b':'#34d399'};font-weight:700;font-size:0.75rem;">${bal>0?fmtAmt(bal):'—'}</td>`;
 
             return [
                 `<tr${pickedPay?' class="chit-picked"':''}>`,
-                `<td>${i+1}</td>`,
+                `<td style="font-size:0.72rem;">${i+1}</td>`,
                 nameCell,
                 paidCell,
                 balCell,
-                `<td style="color:#a5b4fc;font-size:1.05rem;">${monthsCovered}/${totalMonths}</td>`,
-                (()=>{ const mComm=cs.find(c=>c.memberId===m.id&&c.groupId===g.id&&(c.slotNum==null?1:c.slotNum)===slotNum); const commVal=mComm?mComm.targetMonth:0; const commId=mComm?mComm.id:''; return '<td><input type="number" min="0" max="'+totalMonths+'" value="'+(commVal||'')+'" placeholder="—" data-mid="'+m.id+'" data-gid="'+g.id+'" data-slot="'+slotNum+'" data-commid="'+commId+'" onchange="updateGroupCommitment(this)" style="width:60px;background:rgba(155,89,182,0.1);border:1px solid rgba(155,89,182,0.3);color:#bb86fc;border-radius:7px;padding:4px 6px;font-size:0.78rem;font-weight:800;text-align:center;outline:none;" title="Commitment month for this slot"></td>'; })(),
+                `<td style="color:#a5b4fc;font-size:0.78rem;">${monthsCovered}/${totalMonths}</td>`,
+                (()=>{ const mComm=cs.find(c=>c.memberId===m.id&&c.groupId===g.id&&(c.slotNum==null?1:c.slotNum)===slotNum); const commVal=mComm?mComm.targetMonth:0; const commId=mComm?mComm.id:''; return '<td><input type="number" min="0" max="'+totalMonths+'" value="'+(commVal||'')+'" placeholder="—" data-mid="'+m.id+'" data-gid="'+g.id+'" data-slot="'+slotNum+'" data-commid="'+commId+'" onchange="updateGroupCommitment(this)" style="width:46px;background:rgba(155,89,182,0.1);border:1px solid rgba(155,89,182,0.3);color:#bb86fc;border-radius:6px;padding:3px 4px;font-size:0.7rem;font-weight:800;text-align:center;outline:none;" title="Commitment month for this slot"></td>'; })(),
                 `<td>${pickedPay
-                    ?`<div><span class="chit-yes-badge">&#x2705; Picked</span><div style="color:#34d399;font-weight:800;font-size:0.92rem;margin-top:3px;">${fmtAmt(pickedAmt)}</div>${pickedBy?`<div style="font-size:0.98rem;color:var(--text-dim);">by ${pickedBy}</div>`:''}</div>`
-                    :'<span class="chit-no">—</span>'}</td>`,
-                `<td><button class="btn-edit-sm" onclick="openEditMember('${m.id}')">✏️</button></td>`,
+                    ?`<div><span class="chit-yes-badge" style="font-size:0.62rem;padding:1px 5px;">&#x2705;</span>${pickedBy?`<div style="font-size:0.7rem;color:#34d399;font-weight:800;margin-top:2px;">${pickedBy}</div>`:''}</div>`
+                    :'<span class="chit-no" style="font-size:0.72rem;">—</span>'}</td>`,
+                `<td><button class="btn-edit-sm" onclick="openEditMember('${m.id}')" style="padding:3px 6px;font-size:0.72rem;">✏️</button></td>`,
                 `</tr>`
             ].join('');
         }).join('');
@@ -512,39 +560,39 @@ async function renderGroupsTab(){
             <div class="group-card-header" onclick="toggleGroupCard('${bodyId}',this)">
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;">
                     <div>
-                        <div style="font-size:1rem;font-weight:800;color:#f39c12;">📂 ${g.name}</div>
-                        <div style="font-size:0.98rem;color:var(--text-dim);">${(()=>{const slots=gMs.reduce((s,m)=>{const e=(m.enrollments||[]).find(x=>x.groupId===g.id);return s+(e?parseInt(e.qty||1):1);},0);const uniq=gMs.length;return slots===uniq?slots+' members':slots+' chit slots ('+uniq+' members)';})()}  · ${gPays.length} payment entries</div>
-                        <div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;">
-                            <span style="font-size:0.92rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:6px;padding:2px 7px;color:#a5b4fc;">🗓 Started: ${gStartDisp}</span>
-                            ${g.dueDay?`<span style="font-size:0.92rem;background:rgba(243,156,18,.12);border:1px solid rgba(243,156,18,.3);border-radius:6px;padding:2px 7px;color:#f39c12;">📅 Due: ${gDueDayDisp}</span>`:''}
+                        <div style="font-size:0.95rem;font-weight:800;color:#f39c12;">📂 ${g.name}</div>
+                        <div style="font-size:0.72rem;color:var(--text-dim);">${(()=>{const slots=gMs.reduce((s,m)=>{const e=(m.enrollments||[]).find(x=>x.groupId===g.id);return s+(e?parseInt(e.qty||1):1);},0);const uniq=gMs.length;return slots===uniq?slots+' members':slots+' chit slots ('+uniq+' members)';})()}  · ${gPays.length} entries</div>
+                        <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap;">
+                            <span style="font-size:0.66rem;background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.3);border-radius:5px;padding:1px 5px;color:#a5b4fc;">🗓 ${gStartDisp}</span>
+                            ${g.dueDay?`<span style="font-size:0.66rem;background:rgba(243,156,18,.12);border:1px solid rgba(243,156,18,.3);border-radius:5px;padding:1px 5px;color:#f39c12;">📅 Due ${gDueDayDisp}</span>`:''}
                         </div>
                     </div>
-                    <div style="display:flex;gap:6px;align-items:center;">
-                        <button onclick="generateGroupPDF('${g.id}');event.stopPropagation();" class="btn-pdf" style="padding:5px 10px;font-size:1rem;">📄 PDF</button>
-                        <button onclick="openEditGroup('${g.id}');event.stopPropagation();" class="btn-edit-sm">✏️ Edit</button>
+                    <div style="display:flex;gap:5px;align-items:center;">
+                        ${isAdmin()?`<button onclick="openChitDraw('${g.id}');event.stopPropagation();" class="btn-edit-sm" title="Chit draw (spin wheel)" style="padding:4px 8px;font-size:0.85rem;">🎡</button>`:''}
+                        <button onclick="generateGroupPDF('${g.id}');event.stopPropagation();" class="btn-pdf" style="padding:4px 8px;font-size:0.85rem;">📄</button>
+                        <button onclick="openEditGroup('${g.id}');event.stopPropagation();" class="btn-edit-sm" style="padding:4px 8px;font-size:0.85rem;">✏️</button>
                         <span class="chevron-icon closed">▼</span>
                     </div>
                 </div>
-                <div class="row g-2 mt-2">
-                    <div class="col-3"><div class="mini-stat" style="border-top:2px solid #34d399;"><div class="mini-stat-lbl">Collected</div><div class="mini-stat-val" style="color:#34d399;font-size:clamp(0.7rem,2.2vw,0.9rem);">${fmtAmt(tPaid)}</div></div></div>
-                    <div class="col-3"><div class="mini-stat" style="border-top:2px solid #f59e0b;"><div class="mini-stat-lbl">Balance</div><div class="mini-stat-val" style="color:#f59e0b;">${fmtAmt(tBal)}</div></div></div>
-                    <div class="col-3"><div class="mini-stat" style="border-top:2px solid #a5b4fc;"><div class="mini-stat-lbl">Pending</div><div class="mini-stat-val" style="color:#a5b4fc;">${left}/${totalMonths}</div></div></div>
-                    <div class="col-3"><div class="mini-stat" style="border-top:2px solid #34d399;"><div class="mini-stat-lbl">Picked</div><div class="mini-stat-val" style="color:#34d399;">${picked}</div></div></div>
+                <div class="row g-2 mt-2" style="--bs-gutter-x:0.4rem;">
+                    <div class="col-3"><div class="mini-stat" style="border-top:2px solid #34d399;padding:6px 4px;"><div class="mini-stat-lbl" style="font-size:0.56rem;">Collected</div><div class="mini-stat-val" style="color:#34d399;font-size:clamp(0.65rem,2.2vw,0.82rem);">${fmtAmt(tPaid)}</div></div></div>
+                    <div class="col-3"><div class="mini-stat" style="border-top:2px solid #a5b4fc;padding:6px 4px;"><div class="mini-stat-lbl" style="font-size:0.56rem;">Pending</div><div class="mini-stat-val" style="color:#a5b4fc;font-size:0.78rem;">${left}/${totalMonths}</div></div></div>
+                    <div class="col-3"><div class="mini-stat" style="border-top:2px solid #34d399;padding:6px 4px;"><div class="mini-stat-lbl" style="font-size:0.56rem;">Picked</div><div class="mini-stat-val" style="color:#34d399;font-size:0.78rem;">${picked}</div></div></div>
                 </div>
                 <div class="prog-bar-outer mt-2"><div class="prog-bar-inner" style="width:${pct}%"></div></div>
-                <div class="prog-label" style="margin-top:3px;"><span>Month ${elapsed}/${totalMonths}</span><span>${left}/${totalMonths} months pending</span></div>
+                <div class="prog-label" style="margin-top:2px;font-size:0.66rem;"><span>Month ${elapsed}/${totalMonths}</span><span>${left}/${totalMonths} months pending</span></div>
             </div>
             <div class="group-body" id="${bodyId}" style="max-height:0px;opacity:0;margin-top:0;">
 
-                ${gMs.length?`<div class="table-wrap"><table class="table-custom">
+                ${gMs.length?`<div class="table-wrap"><table class="table-custom group-member-table">
                     <thead><tr>
                         <th>#</th>
                         <th onclick="sortGroupMembers('${g.id}','member')" style="cursor:pointer;user-select:none;white-space:nowrap;">Member ${(gSort&&gSort.key==='member')?(gSort.dir===1?'↑':gSort.dir===-1?'↓':'⇅'):'⇅'}</th>
                         <th>Paid</th>
-                        <th>Balance</th>
-                        <th onclick="sortGroupMembers('${g.id}','months')" style="cursor:pointer;user-select:none;white-space:nowrap;">Months ${(gSort&&gSort.key==='months')?(gSort.dir===1?'↑':gSort.dir===-1?'↓':'⇅'):'⇅'}</th>
-                        <th onclick="sortGroupMembers('${g.id}','commitment')" style="cursor:pointer;user-select:none;white-space:nowrap;">Commitment ${(gSort&&gSort.key==='commitment')?(gSort.dir===1?'↑':gSort.dir===-1?'↓':'⇅'):'⇅'}</th>
-                        <th>Chit Picked Amt</th><th></th>
+                        <th>Bal</th>
+                        <th onclick="sortGroupMembers('${g.id}','months')" style="cursor:pointer;user-select:none;white-space:nowrap;">Mo ${(gSort&&gSort.key==='months')?(gSort.dir===1?'↑':gSort.dir===-1?'↓':'⇅'):'⇅'}</th>
+                        <th onclick="sortGroupMembers('${g.id}','commitment')" style="cursor:pointer;user-select:none;white-space:nowrap;">Commit ${(gSort&&gSort.key==='commitment')?(gSort.dir===1?'↑':gSort.dir===-1?'↓':'⇅'):'⇅'}</th>
+                        <th>Picked</th><th></th>
                     </tr></thead>
                     <tbody>${memberRows}</tbody>
                 </table></div>`:'<div style="text-align:center;color:var(--text-dim);font-size:1rem;padding:10px;">No members yet</div>'}
