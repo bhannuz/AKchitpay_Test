@@ -10,7 +10,7 @@
 
     <!-- ── Styles ── -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="css/app.css?v=20261015_v1">
+    <link rel="stylesheet" href="css/app.css?v=20261015_v2">
 
     <!-- ── CDN Libraries (load before app.js) ── -->
     <!-- Early admin-mode detection — runs before CSS renders to avoid nav flash -->
@@ -153,10 +153,21 @@
         </div>
 
         <!-- Admin-only quick action buttons — hidden by default, shown via JS for admin -->
-        <div id="adminQuickBtns" style="display:none;gap:8px;margin-top:8px;flex-wrap:wrap;">
-            <button class="btn btn-outline-warning w-100 fw-bold" style="padding:12px 8px;font-size:0.88rem;border-radius:14px;" onclick="openAddMember()">👤 Create Member</button>
-            <button class="btn btn-outline-success w-100 fw-bold" style="padding:12px 8px;font-size:0.88rem;border-radius:14px;" onclick="openAddGroup()">🏦 New Group</button>
-            <button class="btn w-100 fw-bold" style="flex:1 1 100%;padding:12px 8px;font-size:0.88rem;border-radius:14px;background:rgba(37,211,102,0.12);border:1px solid rgba(37,211,102,0.45);color:#25D366;" onclick="openAckQueue()">💬 WhatsApp Acknowledgements <span id="ackQueueCount" style="display:none;background:#ef4444;color:#fff;border-radius:10px;padding:1px 8px;font-size:0.75rem;margin-left:4px;">0</span></button>
+        <div id="adminQuickBtns" style="display:none;margin-top:10px;">
+            <div class="qa-bar" role="toolbar" aria-label="Quick actions">
+                <button type="button" class="qa-seg" onclick="openAddMember()" title="Create member">
+                    <svg class="qa-ico" style="color:#f39c12" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0"/><path d="M16 19h6"/><path d="M19 16v6"/><path d="M6 21v-2a4 4 0 0 1 4 -4h4"/></svg>
+                    <span class="qa-txt">Member</span>
+                </button>
+                <button type="button" class="qa-seg" onclick="openAddGroup()" title="Create new group">
+                    <svg class="qa-ico" style="color:#2ecc71" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21l18 0"/><path d="M3 10l18 0"/><path d="M5 6l7 -3l7 3"/><path d="M4 10l0 11"/><path d="M20 10l0 11"/><path d="M8 14l0 3"/><path d="M12 14l0 3"/><path d="M16 14l0 3"/></svg>
+                    <span class="qa-txt">Group</span>
+                </button>
+                <button type="button" class="qa-seg" onclick="openAckQueue()" title="WhatsApp acknowledgements" aria-label="WhatsApp acknowledgements">
+                    <svg class="qa-ico" style="color:#25D366" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21l1.65 -3.8a9 9 0 1 1 3.4 2.9l-5.05 .9"/><path d="M9 10a.5 .5 0 0 0 1 0v-1a.5 .5 0 0 0 -1 0v1a5 5 0 0 0 5 5h1a.5 .5 0 0 0 0 -1h-1a.5 .5 0 0 0 0 1"/></svg>
+                    <span class="qa-txt">Messages</span><span id="ackQueueCount" class="qa-badge" style="display:none;">0</span>
+                </button>
+            </div>
         </div>
 
         <div id="adminMemberSearch" class="my-3" style="background:var(--card-bg);border-radius:18px;border:1px solid var(--border);padding:14px;">
@@ -852,8 +863,8 @@
             <div>
                 <label class="form-label-small">Type</label>
                 <select id="pNumMonths" class="form-input" onchange="onNumMonthsChange()" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;">
-                    <option value="1">Single Month</option>
-                    <option value="multi" selected>Multi Month 📅</option>
+                    <option value="1" selected>Single Month</option>
+                    <option value="multi">Multi Month 📅</option>
                 </select>
             </div>
         </div>
@@ -1086,10 +1097,11 @@
 <script src="js/firebase.js?v=20260610_v1"></script>
 <script src="js/helpers.js?v=20260619_v2"></script>
 <script src="js/ui.js?v=20260717_v8"></script>
-<script src="js/ledger.js?v=20260619_v6"></script>
+<script src="js/ledger.js?v=20261017_v2"></script>
 <script src="js/members.js?v=20260610_v1"></script>
-<script src="js/groups.js?v=20260717_v2"></script>
-<script src="js/payments.js?v=20261015_v10"></script>
+<script src="js/groups.js?v=20261020_v1"></script>
+<script src="js/draw.js?v=20261020_v1"></script>
+<script src="js/payments.js?v=20261017_v12"></script>
 <script src="js/acks.js?v=20261015_v6"></script>
 <script src="js/backup.js?v=20260717_v6"></script>
 <script src="js/planner.js?v=20260613_v2"></script>
