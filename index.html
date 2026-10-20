@@ -10,7 +10,7 @@
 
     <!-- ── Styles ── -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="css/app.css?v=20261015_v2">
+    <link rel="stylesheet" href="app.css?v=20261020_v1">
 
     <!-- ── CDN Libraries (load before app.js) ── -->
     <!-- Early admin-mode detection — runs before CSS renders to avoid nav flash -->
@@ -405,6 +405,18 @@
                     <div id="waReminderList" style="display:flex;flex-direction:column;gap:10px;"></div>
                 </div>
             </div>
+        </div>
+
+        <!-- ── Spin Wheel / Chit Draw (Admin only) ── -->
+        <div id="spinWheelSection" class="admin-only-section" style="margin-top:14px;background:var(--card-bg);border:1px solid var(--border);border-radius:16px;overflow:hidden;">
+            <div onclick="toggleSpinSection()" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:pointer;user-select:none;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="width:26px;height:26px;background:#f39c12;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:0.85rem;flex-shrink:0;">🎡</div>
+                    <span style="font-size:0.82rem;font-weight:800;color:#f39c12;text-transform:uppercase;letter-spacing:.5px;">Spin Wheel</span>
+                </div>
+                <span id="spinSectionChevron" style="font-size:0.9rem;color:var(--text-dim);transition:transform .25s;">&#9654;</span>
+            </div>
+            <div id="spinSectionBody" style="display:none;border-top:1px solid var(--border);"></div>
         </div>
 
     </div>
@@ -1099,8 +1111,8 @@
 <script src="js/ui.js?v=20260717_v8"></script>
 <script src="js/ledger.js?v=20261017_v2"></script>
 <script src="js/members.js?v=20260610_v1"></script>
-<script src="js/groups.js?v=20261020_v1"></script>
-<script src="js/draw.js?v=20261020_v1"></script>
+<script src="js/groups.js?v=20260717_v2"></script>
+<script src="js/draw.js?v=20261020_v2"></script>
 <script src="js/payments.js?v=20261017_v12"></script>
 <script src="js/acks.js?v=20261015_v6"></script>
 <script src="js/backup.js?v=20260717_v6"></script>
