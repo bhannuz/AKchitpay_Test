@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title id="appPageTitle">AK Chit Funds - Admin Portal</title>
+
+    <!-- ── Styles ── -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/app.css?v=20261015_v2">
+
+    <!-- ── CDN Libraries (load before app.js) ── -->
+    <!-- Early admin-mode detection — runs before CSS renders to avoid nav flash -->
+    <script>
+        (function(){
+            try {
+                var s = sessionStorage.getItem(typeof APP_CONFIG!=='undefined'?APP_CONFIG.sessionKey:'akdf_session');
+                if(s){ var u=JSON.parse(s); if(u&&u.role==='admin') document.documentElement.classList.add('admin-mode-early'); }
+            }catch(e){}
+        })();
+    </script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<!-- ══ LOGIN SCREEN ══════════════════════════════════════════════════════════ -->
+<div id="loginScreen" style="display:flex;position:fixed;top:0;left:0;width:100%;height:100%;background:#070b14;z-index:9999;align-items:center;justify-content:center;padding:20px;overflow-y:auto;">
+    <div class="login-card">
+        <div class="login-brand">
+            <img src="logo.png" id="appLogoLogin" alt="AK Chit Funds" style="width:56px;height:56px;border-radius:14px;object-fit:cover;margin-bottom:12px;">
+            <div class="login-brand-title" id="appBrandTitle">AK Chit Funds</div>
+            <div class="login-brand-sub">☁ CLOUD &nbsp;·&nbsp; Chit Fund Management</div>
+        </div>
+
+        <!-- Step 1: Enter phone -->
+        <div id="loginStep1" class="login-step active">
+            <div style="font-size:0.8rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;">Enter Mobile Number</div>
+            <div class="login-phone-input">
+                <span class="phone-prefix">+91</span>
+                <input type="tel" id="loginPhone" class="form-input" placeholder="10-digit number" maxlength="10" inputmode="numeric" style="flex:1;margin-bottom:0;"
+                    onkeydown="if(event.key==='Enter') handleLoginSubmit()">
+            </div>
+            <button class="btn-save" style="margin-top:14px;width:100%;" onclick="handleLoginSubmit()">🔐 Request Access</button>
+        </div>
+
+        <!-- Step 2: Pending approval -->
+        <div id="loginStep2" class="login-step">
+            <div class="pending-box">
+                <div style="font-size:2rem;margin-bottom:10px;">⏳</div>
+                <div style="font-weight:800;color:#fbbf24;margin-bottom:6px;">Access Pending</div>
+                <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:4px;">Request sent for</div>
+                <div id="pendingPhone" style="font-weight:700;color:white;margin-bottom:14px;"></div>
+                <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:14px;">Waiting for admin approval. This page will refresh automatically.</div>
+                <button class="btn-save" style="width:100%;margin-bottom:8px;" onclick="checkAccessStatus()">🔄 Check Status</button>
+                <button class="btn-cancel" style="width:100%;" onclick="goBackToLogin()">← Back</button>
+            </div>
+        </div>
+
+        <!-- Step 3: Denied -->
+        <div id="loginStep3" class="login-step">
+            <div class="denied-box">
+                <div style="font-size:2rem;margin-bottom:10px;">🚫</div>
+                <div style="font-weight:800;color:#f87171;margin-bottom:8px;">Access Denied</div>
+                <div style="font-size:0.85rem;color:var(--text-dim);margin-bottom:14px;">Your request was not approved. Contact the admin for assistance.</div>
+                <button class="btn-cancel" style="width:100%;" onclick="goBackToLogin()">← Try Again</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- ══ END LOGIN SCREEN ═══════════════════════════════════════════════════════ -->
+
+<div class="container py-2" style="padding-left:12px;padding-right:12px;">
+    <!-- ADMIN HEADER -->
+    <div id="adminHeader" class="app-header">
+        <div class="brand-wrap">
+            <div class="brand-logo">
+                <img src="logo.png" id="appLogoHeader" alt="AK Chit Funds" style="width:46px;height:46px;border-radius:10px;object-fit:cover;">
+            </div>
+            <div class="brand-text">
+                <div class="brand-name" id="appBrandName">AK Chit Funds <span class="brand-cloud" id="appBrandCloud">☁ CLOUD</span></div>
+                <div class="brand-sub">Chit Fund Management</div>
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span id="headerRoleBadge" class="badge text-warning border border-warning" style="padding:4px 8px;font-size:0.72rem;">ADMIN</span>
+            <button id="accessReqBtn" onclick="openAccessRequests()" title="Access Requests" style="display:none;background:rgba(243,156,18,.12);border:1px solid rgba(243,156,18,.3);color:#f39c12;border-radius:10px;padding:5px 10px;font-size:1.05rem;font-weight:700;cursor:pointer;position:relative;">
+                🔐 Requests <span id="pendingCount" style="display:none;background:#ef4444;color:white;border-radius:50%;width:16px;height:16px;font-size:0.98rem;font-weight:900;position:absolute;top:-5px;right:-5px;display:flex;align-items:center;justify-content:center;"></span>
+            </button>
+            <button id="backupReminderBtn" onclick="switchTab('backup')" class="backup-badge-btn" title="Daily backup due!" style="padding:5px 9px;font-size:0.72rem;">
+                💾
+            </button>
+            <button id="logoutBtn" onclick="handleLogout()" style="display:none;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:10px;padding:5px 10px;font-size:1.05rem;font-weight:700;cursor:pointer;">⏻ Logout</button>
+        </div>
+    </div>
+
+    <!-- Desktop tab nav removed — bottom nav bar used for all screen sizes -->
+
+    <!-- MEMBER PROFILE HEADER -->
+    <div id="memberHeader" style="display:none;padding:16px 4px 0;">
+        <div style="background:linear-gradient(135deg,rgba(243,156,18,.18),rgba(243,156,18,.04));border:1px solid rgba(243,156,18,.3);border-radius:22px;padding:18px 18px 14px;">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+                <div id="memberHeaderAvatar" style="width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,#f39c12,#f57c00);color:black;display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:900;flex-shrink:0;box-shadow:0 4px 14px rgba(243,156,18,.35);"></div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:1.05rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">Welcome back 👋</div>
+                    <div id="memberHeaderName" style="font-size:1.15rem;font-weight:900;color:#f39c12;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                    <div id="memberHeaderPhone" style="font-size:0.92rem;color:var(--text-dim);margin-top:1px;"></div>
+                </div>
+                <button onclick="handleLogout()" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:10px;padding:6px 11px;font-size:0.92rem;font-weight:700;cursor:pointer;flex-shrink:0;">⏻</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:2px;">
+                <div style="background:rgba(0,0,0,.2);border-radius:12px;padding:10px 8px;text-align:center;">
+                    <div id="mhGroups" style="font-size:1rem;font-weight:800;color:#a5b4fc;">—</div>
+                    <div style="font-size:0.98rem;color:var(--text-dim);text-transform:uppercase;margin-top:2px;">My Groups</div>
+                </div>
+                <div style="background:rgba(0,0,0,.2);border-radius:12px;padding:10px 8px;text-align:center;">
+                    <div id="mhTotalPaid" style="font-size:1.05rem;font-weight:800;color:#34d399;">—</div>
+                    <div style="font-size:0.98rem;color:var(--text-dim);text-transform:uppercase;margin-top:2px;">Total Paid</div>
+                </div>
+                <div style="background:rgba(0,0,0,.2);border-radius:12px;padding:10px 8px;text-align:center;">
+                    <div id="mhBalance" style="font-size:1.05rem;font-weight:800;color:#f59e0b;">—</div>
+                    <div style="font-size:0.98rem;color:var(--text-dim);text-transform:uppercase;margin-top:2px;">Balance</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MEMBER SUB-TAB NAV — shown only in member-mode -->
+    <div id="memberSubNav" style="display:none;padding:10px 0 0;">
+        <div style="display:flex;gap:6px;margin-bottom:12px;">
+            <button id="mSubDash"  onclick="switchMemberSubTab('dash')"  style="flex:1;padding:8px 4px;border:none;border-radius:10px;font-size:0.72rem;font-weight:800;cursor:pointer;background:rgba(243,156,18,0.85);color:black;transition:all .2s;">🏠 Dashboard</button>
+            <button id="mSubQr"    onclick="switchMemberSubTab('qr')"    style="flex:1;padding:8px 4px;border:none;border-radius:10px;font-size:0.72rem;font-weight:800;cursor:pointer;background:var(--card-bg);color:var(--text-dim);border:1px solid var(--border);transition:all .2s;">📱 QR Pay</button>
+        </div>
+    </div>
+
+    <!-- HOME TAB -->
+    <div id="homeTab" class="tab-content active">
+        <div id="adminStatCards" class="row g-2 mt-3 text-center" style="margin-left:0;margin-right:0;">
+            <div class="col-4"><div class="stat-card" onclick="openMembersQuickView()" style="cursor:pointer;active:scale(0.97);transition:transform .1s;" title="View all members"><span class="stat-num" id="memberCount">-</span><span class="stat-label">Members</span></div></div>
+            <div class="col-4"><div class="stat-card" onclick="openGroupsQuickView()" style="cursor:pointer;" title="View all groups"><span class="stat-num" id="groupCount">-</span><span class="stat-label">Groups</span></div></div>
+            <div class="col-4"><div class="stat-card"><span class="stat-num text-success" id="todayColl">₹0</span><span class="stat-label">Today</span></div></div>
+        </div>
+        <div id="adminActionBtns" style="display:flex;gap:8px;margin-top:12px;">
+            <button class="btn btn-warning w-100 fw-bold shadow" onclick="openPaymentModal()" style="border-radius:16px;padding:15px;font-size:1.05rem;">💳 Record Payment</button>
+
+        </div>
+
+        <!-- Admin-only quick action buttons — hidden by default, shown via JS for admin -->
+        <div id="adminQuickBtns" style="display:none;margin-top:10px;">
+            <div class="qa-bar" role="toolbar" aria-label="Quick actions">
+                <button type="button" class="qa-seg" onclick="openAddMember()" title="Create member">
+                    <svg class="qa-ico" style="color:#f39c12" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0"/><path d="M16 19h6"/><path d="M19 16v6"/><path d="M6 21v-2a4 4 0 0 1 4 -4h4"/></svg>
+                    <span class="qa-txt">Member</span>
+                </button>
+                <button type="button" class="qa-seg" onclick="openAddGroup()" title="Create new group">
+                    <svg class="qa-ico" style="color:#2ecc71" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21l18 0"/><path d="M3 10l18 0"/><path d="M5 6l7 -3l7 3"/><path d="M4 10l0 11"/><path d="M20 10l0 11"/><path d="M8 14l0 3"/><path d="M12 14l0 3"/><path d="M16 14l0 3"/></svg>
+                    <span class="qa-txt">Group</span>
+                </button>
+                <button type="button" class="qa-seg" onclick="openAckQueue()" title="WhatsApp acknowledgements" aria-label="WhatsApp acknowledgements">
+                    <svg class="qa-ico" style="color:#25D366" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21l1.65 -3.8a9 9 0 1 1 3.4 2.9l-5.05 .9"/><path d="M9 10a.5 .5 0 0 0 1 0v-1a.5 .5 0 0 0 -1 0v1a5 5 0 0 0 5 5h1a.5 .5 0 0 0 0 -1h-1a.5 .5 0 0 0 0 1"/></svg>
+                    <span class="qa-txt">Messages</span><span id="ackQueueCount" class="qa-badge" style="display:none;">0</span>
+                </button>
+            </div>
+        </div>
+
+        <div id="adminMemberSearch" class="my-3" style="background:var(--card-bg);border-radius:18px;border:1px solid var(--border);padding:14px;">
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+                <div style="position:relative;flex:1;">
+                    <input type="text" id="summarySearch" class="form-input" style="margin-bottom:0;" placeholder="🔍 Search Member for Summary / PDF..." oninput="filterSearch('summarySearch','summaryList','summaryView')">
+                    <input type="hidden" id="summaryView">
+                    <div id="summaryList" class="suggestions-list"></div>
+                </div>
+                <button onclick="clearMemberSearch()" title="Clear / Refresh" style="background:var(--input-bg);border:1px solid var(--border);color:#f39c12;border-radius:12px;padding:12px 14px;font-size:1rem;cursor:pointer;flex-shrink:0;line-height:1;">🔄</button>
+            </div>
+            <div id="ledgerData"></div>
+        </div>
+
+        <!-- Member Statistics Panel -->
+        <div id="mStatsPanel" style="display:none;margin-top:4px;">
+            <!-- Filters -->
+            <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:8px;">
+                <div style="font-size:0.62rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px;">🔍 Filters</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:7px;">
+                    <div>
+                        <label style="font-size:0.6rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">🏦 Group</label>
+                        <select id="mStatsGroupFilter" class="form-input" style="margin-bottom:0;font-size:0.75rem;padding:6px 8px;" onchange="renderMemberStats()">
+                            <option value="">All Groups</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:0.6rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">📅 Month</label>
+                        <select id="mStatsMonthFilter" class="form-input" style="margin-bottom:0;font-size:0.75rem;padding:6px 8px;" onchange="renderMemberStats()">
+                            <option value="">All Months</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="document.getElementById('mStatsGroupFilter').value='';document.getElementById('mStatsMonthFilter').value='';renderMemberStats();" style="width:100%;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#ef4444;border-radius:8px;padding:6px;font-size:0.72rem;font-weight:800;cursor:pointer;">✕ Clear Filters</button>
+            </div>
+            <!-- Summary + Groups 2-col -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:7px 10px;border-bottom:1px solid var(--border);font-size:0.6rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">📊 Summary</div>
+                    <table style="width:100%;border-collapse:collapse;"><tbody id="mStatsSummary"></tbody></table>
+                </div>
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:7px 10px;border-bottom:1px solid var(--border);font-size:0.6rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">🏦 Groups <span style="font-size:0.5rem;font-weight:400;color:var(--text-dim);">tap=filter</span></div>
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead><tr style="background:rgba(255,255,255,0.02);">
+                            <th style="padding:5px 8px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:left;">Group</th>
+                            <th style="padding:5px 8px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:right;">Paid</th>
+                            <th style="padding:5px 8px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:right;">Bal</th>
+                            <th style="padding:5px 8px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:left;">%</th>
+                        </tr></thead>
+                        <tbody id="mStatsGroups"></tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- Payment History full width -->
+            <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:8px;">
+                <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:0.6rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">📅 Payment History</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="background:rgba(255,255,255,0.02);">
+                        <th style="padding:5px 10px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:left;">Date</th>
+                        <th style="padding:5px 10px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:right;">Paid</th>
+                        <th style="padding:5px 10px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:left;">Mode</th>
+                        <th style="padding:5px 10px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:left;">Group</th>
+                        <th style="padding:5px 10px;font-size:0.57rem;color:var(--text-dim);font-weight:700;text-align:center;">Chit</th>
+                    </tr></thead>
+                    <tbody id="mStatsMonthly"></tbody>
+                </table>
+            </div>
+        </div>
+
+        
+
+
+
+        <!-- ── QR Payment Generator (Admin only) ── -->
+        <div id="qrGeneratorSection" style="margin-top:14px;background:var(--card-bg);border:1px solid var(--border);border-radius:16px;overflow:hidden;">
+            <div onclick="toggleQrSection()" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:pointer;user-select:none;">
+                <span style="font-size:0.82rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.5px;">📱 QR Payment Generator</span>
+                <span id="qrSectionChevron" style="font-size:0.9rem;color:var(--text-dim);transition:transform .25s;">&#9654;</span>
+            </div>
+            <div id="qrSectionBody" style="display:none;border-top:1px solid var(--border);">
+
+                <!-- ── Saved Versions ── -->
+                <div id="qr_versions_bar" style="padding:10px 14px;border-bottom:1px solid var(--border);display:none;">
+                    <div style="font-size:0.62rem;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">📁 Saved Versions</div>
+                    <div id="qr_versions_list" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                </div>
+
+                <div style="padding:14px 16px;">
+                    <!-- Version name + save -->
+                    <div style="display:flex;gap:8px;margin-bottom:12px;">
+                        <input type="text" id="qr_version_name" class="form-input" style="margin-bottom:0;flex:1;" placeholder="Version name (e.g. 3 Lakhs Apr 2026)">
+                        <button onclick="qrSaveVersion()" style="background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;padding:10px 14px;border-radius:10px;font-size:0.78rem;font-weight:800;cursor:pointer;flex-shrink:0;white-space:nowrap;">💾 Save</button>
+                        <button onclick="qrNewForm()" style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:10px 12px;border-radius:10px;font-size:0.78rem;font-weight:800;cursor:pointer;flex-shrink:0;">＋ New</button>
+                    </div>
+
+                    <!-- Common fields -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                        <div>
+                            <label class="form-label-small">UPI ID</label>
+                            <input type="text" id="qr_upi" class="form-input" style="margin-bottom:0;" placeholder="e.g. 9876543210@ybl">
+                        </div>
+                        <div>
+                            <label class="form-label-small">Amount (₹)</label>
+                            <input type="number" id="qr_amt" class="form-input" style="margin-bottom:0;" placeholder="e.g. 23077">
+                        </div>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+                        <div>
+                            <label class="form-label-small">Group / Month</label>
+                            <input type="text" id="qr_note" class="form-input" style="margin-bottom:0;" placeholder="e.g. 3 Lakhs – Apr 2026" oninput="onQrGroupChange()">
+                        </div>
+                        <div>
+                            <label class="form-label-small">Due Date</label>
+                            <div style="display:flex;gap:6px;">
+                                <input type="date" id="qr_due" class="form-input" style="margin-bottom:0;flex:1;">
+                                <button type="button" onclick="setQrDueDate()" title="Set to 30 days later" style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;border-radius:10px;padding:8px 10px;font-size:0.75rem;font-weight:800;cursor:pointer;flex-shrink:0;white-space:nowrap;">+30d</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Member selection -->
+                    <label class="form-label-small">Select Members to Publish</label>
+                    <div style="display:flex;gap:8px;margin-bottom:8px;">
+                        <div style="position:relative;flex:1;">
+                            <input type="text" id="qr_member_search" class="form-input" style="margin-bottom:0;" placeholder="🔍 Type member name to add..." oninput="filterSearch('qr_member_search','qr_member_list','qr_member_id')">
+                            <input type="hidden" id="qr_member_id">
+                            <div id="qr_member_list" class="suggestions-list"></div>
+                        </div>
+                        <button onclick="qrAddMember()" style="background:rgba(99,102,241,0.2);border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:10px 14px;border-radius:10px;font-size:0.82rem;font-weight:800;cursor:pointer;flex-shrink:0;">＋ Add</button>
+                    </div>
+                    <div id="qr_selected_members" style="display:flex;flex-wrap:wrap;gap:6px;min-height:16px;margin-bottom:14px;"></div>
+
+                    <!-- Generate + Publish -->
+                    <button onclick="generateStandaloneQr()" style="width:100%;background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;padding:12px;border-radius:10px;font-size:0.88rem;font-weight:800;cursor:pointer;margin-bottom:8px;">⚡ Generate QR</button>
+                    <div id="qr_display" style="display:none;">
+                        <div id="qr_info" style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:10px;padding:12px;margin-bottom:12px;font-size:0.82rem;color:var(--text-dim);text-align:center;"></div>
+                        <div id="qr_img" style="display:flex;justify-content:center;margin-bottom:10px;"></div>
+                        <div style="font-size:0.7rem;color:var(--text-dim);text-align:center;margin-bottom:12px;">Scan with PhonePe · GPay · Paytm · any UPI app</div>
+                        <div style="display:flex;gap:8px;margin-bottom:8px;">
+                            <button onclick="downloadStandaloneQr()" style="flex:1;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#34d399;padding:10px;border-radius:10px;font-size:0.78rem;font-weight:800;cursor:pointer;">⬇ Download</button>
+                            <button onclick="shareStandaloneQr()" style="flex:1;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:10px;border-radius:10px;font-size:0.78rem;font-weight:800;cursor:pointer;">↗ Share</button>
+                        </div>
+                        <button onclick="publishQrToMember()" style="width:100%;background:linear-gradient(135deg,#f39c12,#f57c00);color:#000;border:none;padding:12px;border-radius:10px;font-size:0.88rem;font-weight:900;cursor:pointer;">📤 Publish to Selected Members</button>
+                        <div id="qr_publish_status" style="font-size:0.72rem;text-align:center;color:var(--text-dim);margin-top:6px;min-height:14px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── WhatsApp Reminders (Admin only) ── -->
+        <div id="waReminderSection" class="admin-only-section" style="margin-top:14px;background:var(--card-bg);border:1px solid var(--border);border-radius:16px;overflow:hidden;">
+            <div onclick="toggleWaSection()" style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:pointer;user-select:none;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="width:26px;height:26px;background:#25D366;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:0.85rem;flex-shrink:0;">💬</div>
+                    <span style="font-size:0.82rem;font-weight:800;color:#34d399;text-transform:uppercase;letter-spacing:.5px;">WhatsApp Reminders</span>
+                </div>
+                <span id="waSectionChevron" style="font-size:0.9rem;color:var(--text-dim);transition:transform .25s;">&#9654;</span>
+            </div>
+            <div id="waSectionBody" style="display:none;border-top:1px solid var(--border);">
+                <div style="padding:14px 16px;">
+
+                    <!-- Version save/load bar -->
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:10px 12px;background:rgba(37,211,102,0.05);border:1px solid rgba(37,211,102,0.2);border-radius:12px;">
+                        <input type="text" id="wa_version_name" class="form-input" style="flex:1;margin-bottom:0;font-size:0.8rem;padding:8px 10px;" placeholder="Version name (e.g. April Reminder, Group A)">
+                        <button onclick="waSaveVersion()" style="background:linear-gradient(135deg,#25D366,#128C7E);color:white;border:none;padding:8px 14px;border-radius:9px;font-size:0.75rem;font-weight:800;cursor:pointer;white-space:nowrap;">💾 Save</button>
+                        <button onclick="waNewVersion()" style="background:rgba(37,211,102,0.12);border:1px solid rgba(37,211,102,0.3);color:#34d399;padding:8px 12px;border-radius:9px;font-size:0.75rem;font-weight:800;cursor:pointer;white-space:nowrap;">＋ New</button>
+                    </div>
+
+                    <!-- Saved versions list -->
+                    <div id="wa_versions_bar" style="display:none;margin-bottom:12px;">
+                        <div style="font-size:0.6rem;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">📁 Saved Versions</div>
+                        <div id="wa_versions_list" style="display:flex;flex-direction:column;gap:5px;"></div>
+                    </div>
+
+                    <!-- Contact number -->
+                    <div style="margin-bottom:12px;">
+                        <label class="form-label-small">Your Contact Number (appears in message)</label>
+                        <input type="text" id="wa_contact" class="form-input" style="margin-bottom:0;" placeholder="e.g. 9876543210" oninput="waAutoSave()">
+                    </div>
+
+                    <!-- Custom template (optional) -->
+                    <div style="margin-bottom:12px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+                            <label class="form-label-small" style="margin-bottom:0;">Custom Template <span style="color:var(--text-dim);font-weight:400;">(optional)</span></label>
+                            <button onclick="document.getElementById('wa_template').value='';waAutoSave();" style="background:none;border:none;color:var(--text-dim);font-size:0.65rem;cursor:pointer;padding:0;">Clear</button>
+                        </div>
+                        <textarea id="wa_template" class="form-input" rows="5" style="margin-bottom:4px;font-size:0.75rem;font-family:monospace;resize:vertical;" placeholder="Leave blank for default message. Use [memberName], [groupName], [balance], [paidMonths], etc." oninput="waAutoSave()"></textarea>
+                        <div style="font-size:0.6rem;color:var(--text-dim);line-height:1.8;">
+                            <span style="color:#a5b4fc;font-weight:700;">Member:</span>
+                            <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[memberName]</span>
+                            <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[memberPhone]</span>
+                            <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[memberId]</span>
+                            <span style="background:rgba(165,180,252,0.1);border:1px solid rgba(165,180,252,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[contact]</span><br>
+                            <span style="color:#34d399;font-weight:700;">Financial:</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[totalPaid]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[balance]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[monthlyAmount]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[totalBalance]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[dueAmount]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[chitValue]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[lastPaidAmount]</span>
+                            <span style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[lastPaidDate]</span><br>
+                            <span style="color:#10b981;font-weight:700;">Group:</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[groupName]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[allGroups]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[nextDueDate]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[dueDay]</span>
+                            <span style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[daysUntilDue]</span><br>
+                            <span style="color:#f59e0b;font-weight:700;">Progress & Timeline:</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[paidMonths]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[totalMonths]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[monthsRemaining]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[progressPercent]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[startDate]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[endDate]</span>
+                            <span style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:1px 5px;margin:0 2px;font-family:monospace;">[todayDate]</span>
+                        </div>
+                    </div>
+
+                    <!-- Member selection -->
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                        <label class="form-label-small" style="margin-bottom:0;">Select Members</label>
+                        <div style="display:flex;gap:6px;">
+                            <button onclick="waSelectAll()" style="background:rgba(37,211,102,0.12);border:1px solid rgba(37,211,102,0.3);color:#34d399;border-radius:8px;padding:4px 10px;font-size:0.68rem;font-weight:800;cursor:pointer;">All</button>
+                            <button onclick="waClearAll()" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:8px;padding:4px 10px;font-size:0.68rem;font-weight:800;cursor:pointer;">Clear</button>
+                        </div>
+                    </div>
+                    <div id="waSelectedCount" style="font-size:0.7rem;color:#34d399;font-weight:700;margin-bottom:6px;min-height:14px;"></div>
+                    <div id="waMemberGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:260px;overflow-y:auto;margin-bottom:14px;"></div>
+
+                    <!-- Generate -->
+                    <button onclick="generateWaReminders()" style="width:100%;background:linear-gradient(135deg,#25D366,#128C7E);color:white;border:none;padding:13px;border-radius:12px;font-size:0.92rem;font-weight:800;cursor:pointer;margin-bottom:10px;">💬 Generate Reminders</button>
+                    <div id="waReminderCount" style="font-size:0.78rem;text-align:center;margin-bottom:8px;min-height:18px;"></div>
+                    <div id="waReminderList" style="display:flex;flex-direction:column;gap:10px;"></div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- MEMBER PANELS (outside homeTab so tab switching works) -->
+    <!-- Dashboard panel: ledger for member's own account -->
+    <div id="mDashPanel" style="display:none;margin-top:4px;">
+        <div id="memberLedgerArea" style="margin-top:0;">
+            <div id="memberLedgerData"></div>
+        </div>
+    </div>
+
+    <!-- Payments panel: same ledger but scrollable history view -->
+    <div id="mPayPanel" style="display:none;margin-top:4px;">
+        <div id="memberLedgerArea2" style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center;color:var(--text-dim);font-size:0.82rem;">
+            Loading payment history…
+        </div>
+    </div>
+
+    <!-- QR panel: admin payment requests + UPI links -->
+    <div id="mQrPanel" style="display:none;margin-top:4px;">
+        <!-- Admin QR payment requests -->
+        <div id="memberQrArea"></div>
+    </div>
+
+    <!-- GROUPS TAB -->
+    <div id="groupsTab" class="tab-content">
+        <div style="display:flex;gap:6px;margin:10px 0;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:5px;">
+            <button id="grpSubGroups" onclick="switchGroupsSubTab('groups')" style="flex:1;padding:8px;border:none;border-radius:9px;font-size:0.8rem;font-weight:800;cursor:pointer;transition:all .2s;">📂 Groups</button>
+            <button id="grpSubCollections" onclick="switchGroupsSubTab('collections')" style="flex:1;padding:8px;border:none;border-radius:9px;font-size:0.8rem;font-weight:800;cursor:pointer;transition:all .2s;">📅 Monthly Collection</button>
+        </div>
+
+        <div id="groupListArea" class="mt-2"></div>
+        <div id="collectionsArea" style="display:none;"></div>
+    </div>
+
+    <!-- PLANNER TAB -->
+    <div id="plannerTab" class="tab-content">
+        <div style="padding-top:12px;">
+
+            <!-- Sub-tab buttons -->
+            <div style="display:flex;gap:8px;margin-bottom:14px;">
+                <button id="plSubPlanner" onclick="switchPlannerSubTab('planner')" style="flex:1;padding:9px;border:none;border-radius:12px;font-size:0.82rem;font-weight:800;cursor:pointer;background:rgba(99,102,241,0.85);color:white;transition:all .2s;">📋 Planner</button>
+                <button id="plSubCompleted" onclick="switchPlannerSubTab('completed')" style="flex:1;padding:9px;border:none;border-radius:12px;font-size:0.82rem;font-weight:800;cursor:pointer;background:var(--card-bg);color:var(--text-dim);border:1px solid var(--border);transition:all .2s;">✅ Completed Groups</button>
+            </div>
+
+            <!-- Planner sub-tab -->
+            <div id="plPlannerPanel">
+
+            <!-- Saved Versions bar -->
+            <div id="ncpSavedBar" style="margin-bottom:12px;"></div>
+
+            <!-- Main Planner Card -->
+            <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:18px;overflow:hidden;margin-bottom:16px;">
+
+                <!-- Header -->
+                <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                    <div style="font-size:0.78rem;font-weight:800;color:#f39c12;text-transform:uppercase;letter-spacing:.6px;">📋 Chit Planner</div>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                        <input id="ncp_version_label" type="text" placeholder="Version name (e.g. Gold v1)" style="background:var(--input-bg);border:1px solid var(--border);color:white;padding:7px 10px;border-radius:9px;font-size:0.78rem;width:160px;">
+                        <button onclick="ncpSaveVersion()" style="background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;padding:7px 14px;border-radius:9px;font-size:0.78rem;font-weight:800;cursor:pointer;white-space:nowrap;">💾 Save</button>
+                        <button onclick="ncpNewPlanner()" style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:7px 12px;border-radius:9px;font-size:0.78rem;font-weight:800;cursor:pointer;white-space:nowrap;">＋ New</button>
+                    </div>
+                </div>
+
+                <!-- Parameters -->
+                <div style="padding:16px;border-bottom:1px solid var(--border);">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                        <div>
+                            <div style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-bottom:5px;">💰 Chit Amount (₹)</div>
+                            <input id="ncp_amount" type="number" class="form-input" placeholder="e.g. 500000" oninput="ncpAutoSave()" style="margin-bottom:0;padding:9px 11px;font-size:0.85rem;">
+                        </div>
+                        <div>
+                            <div style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-bottom:5px;">👥 Members / Months</div>
+                            <div style="display:flex;align-items:center;background:var(--input-bg);border:1px solid var(--border);border-radius:10px;overflow:hidden;">
+                                <input id="ncp_members" type="number" class="form-input" placeholder="13" oninput="ncpSyncMembDur();ncpAutoSave();" style="margin-bottom:0;padding:9px 8px;font-size:0.95rem;font-weight:800;text-align:center;border:none;border-radius:0;flex:1;background:transparent;">
+                                <span style="font-size:1.1rem;font-weight:900;color:var(--text-dim);padding:0 2px;">/</span>
+                                <input id="ncp_duration" type="number" class="form-input" placeholder="13" oninput="ncpAutoSave();" style="margin-bottom:0;padding:9px 8px;font-size:0.95rem;font-weight:800;text-align:center;border:none;border-radius:0;flex:1;background:transparent;">
+                            </div>
+                        </div>
+                        <div>
+                            <div style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-bottom:5px;">🗓️ Start Date</div>
+                            <input id="ncp_start" type="date" class="form-input" oninput="ncpAutoSave()" style="margin-bottom:0;padding:9px 11px;font-size:0.85rem;">
+                        </div>
+                        <div>
+                            <div style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-bottom:5px;">📅 Due Day of Month</div>
+                            <input id="ncp_dueday" type="number" min="1" max="31" class="form-input" placeholder="e.g. 5" oninput="ncpAutoSave()" style="margin-bottom:0;padding:9px 11px;font-size:0.85rem;">
+                        </div>
+                    </div>
+                    <!-- Commission / Foreman cut -->
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                        <div>
+                            <div style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-bottom:5px;">🏦 Foreman Commission (%)</div>
+                            <input id="ncp_commission" type="number" min="0" max="10" step="0.5" class="form-input" placeholder="e.g. 5" oninput="ncpAutoSave()" style="margin-bottom:0;padding:9px 11px;font-size:0.85rem;">
+                        </div>
+                        <div>
+                            <div style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-bottom:5px;">👤 Member Name</div>
+                            <input id="ncp_member" type="text" class="form-input" placeholder="Planned for (optional)" oninput="ncpAutoSave()" style="margin-bottom:0;padding:9px 11px;font-size:0.85rem;">
+                        </div>
+                    </div>
+                    <!-- Payout increment range -->
+                    <div style="background:rgba(99,102,241,0.07);border:1px solid rgba(99,102,241,0.2);border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+                        <div style="font-size:0.65rem;color:#a5b4fc;font-weight:700;text-transform:uppercase;margin-bottom:8px;">📈 Payout Increment Range (across duration)</div>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                            <div>
+                                <div style="font-size:0.6rem;color:var(--text-dim);margin-bottom:4px;">Min Discount % <span style="color:#f87171;">(month 1 winner)</span></div>
+                                <input id="ncp_incr_min" type="number" min="0" max="50" step="0.5" class="form-input" placeholder="e.g. 10" oninput="ncpAutoSave()" style="margin-bottom:0;padding:9px 11px;font-size:0.85rem;">
+                            </div>
+                            <div>
+                                <div style="font-size:0.6rem;color:var(--text-dim);margin-bottom:4px;">Max Discount % <span style="color:#34d399;">(last winner — use negative for bonus)</span></div>
+                                <input id="ncp_incr_max" type="number" min="-50" max="50" step="0.5" class="form-input" placeholder="e.g. -10 or 0" oninput="ncpAutoSave()" style="margin-bottom:0;padding:9px 11px;font-size:0.85rem;">
+                            </div>
+                        </div>
+                        <div style="font-size:0.6rem;color:var(--text-dim);margin-top:6px;">Month 1 winner gets lowest payout (highest discount). Last month winner gets full/near-full amount. Leave blank to use commission-based spread.</div>
+                    </div>
+                    <button onclick="ncpGenerate()" style="width:100%;background:linear-gradient(135deg,#6366f1,#4f46e5);color:white;border:none;padding:12px;border-radius:10px;font-size:0.88rem;font-weight:800;cursor:pointer;">⚡ Generate Schedule</button>
+                </div>
+
+                <!-- Generated Schedule -->
+                <div id="ncp_tableWrap" style="display:none;">
+                    <!-- Summary chips -->
+                    <div id="ncp_chips" style="display:flex;flex-wrap:wrap;gap:0;border-bottom:1px solid var(--border);"></div>
+
+                    <!-- Schedule rows header -->
+                    <div style="padding:12px 16px 6px;">
+                        <div style="font-size:0.65rem;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">✏️ Edit Schedule</div>
+                        <div style="display:flex;gap:3px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;padding:0 8px;margin-bottom:4px;">
+                            <span style="width:22px;text-align:center;">#</span>
+                            <span style="flex:1.5;">Due Date</span>
+                            <span style="flex:1;">Monthly Pay</span>
+                            <span style="flex:1;color:#a5b4fc;">Payout Amt ✏️</span>
+                            <span style="flex:0.9;color:#f59e0b;">Owner Profit ↓auto</span>
+                            <span style="width:44px;text-align:center;color:#a5b4fc;">% Return</span>
+                        </div>
+                        <div id="ncp_rows" style="display:flex;flex-direction:column;gap:4px;max-height:340px;overflow-y:auto;"></div>
+                    </div>
+
+                    <!-- Totals -->
+                    <div id="ncp_total" style="display:flex;align-items:center;gap:3px;padding:8px 16px;background:rgba(243,156,18,0.07);border-top:1px solid var(--border);font-size:0.82rem;font-weight:800;">
+                        <span style="width:22px;"></span>
+                        <span style="flex:1.5;color:#f39c12;">TOTAL</span>
+                        <span id="ncp_totalPay" style="flex:1;color:#34d399;"></span>
+                        <span id="ncp_totalPayout" style="flex:1;color:#a5b4fc;"></span>
+                        <span id="ncp_totalProfit" style="flex:0.9;color:#f59e0b;"></span>
+                        <span style="width:44px;"></span>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div style="padding:12px 16px;display:flex;gap:8px;">
+                        <button onclick="ncpSaveVersion()" style="flex:1;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;padding:10px;border-radius:10px;font-size:0.82rem;font-weight:800;cursor:pointer;">💾 Save Version</button>
+                        <button onclick="ncpPrint()" style="flex:2;background:linear-gradient(135deg,#f39c12,#f57c00);color:#000;border:none;padding:10px;border-radius:10px;font-size:0.82rem;font-weight:800;cursor:pointer;">🖨️ Print Schedule</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Planner Insights — shown at bottom after generation -->
+            <div id="ncpSuggestionBox" style="display:none;background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:16px;margin-top:4px;">
+                <div style="font-size:0.68rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">💡 Planner Insights</div>
+                <div id="ncpSuggestionText" style="font-size:0.82rem;color:var(--text-dim);line-height:1.8;"></div>
+            </div>
+
+            </div><!-- end plPlannerPanel -->
+
+            <!-- Completed Groups sub-tab -->
+            <div id="plCompletedPanel" style="display:none;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                    <span style="font-size:0.65rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.5px;">✅ Completed Chit Groups</span>
+                    <button onclick="renderCompletedGroups()" style="background:none;border:none;color:var(--text-dim);font-size:0.75rem;cursor:pointer;">🔄 Refresh</button>
+                </div>
+                <div id="completedGroupsList"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- BACKUP TAB -->
+    <div id="backupTab" class="tab-content">
+        <h5 class="mt-4 mb-3 text-warning text-center">💾 Data Management</h5>
+
+        <!-- ── Sub-tab buttons ── -->
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+            <button id="bkSubStats" onclick="switchBackupSubTab('stats')" style="flex:1;padding:10px;border:none;border-radius:12px;font-size:0.85rem;font-weight:800;cursor:pointer;background:rgba(99,102,241,0.85);color:white;transition:all .2s;">📊 Statistics</button>
+            <button id="bkSubBackup" onclick="switchBackupSubTab('backup')" style="flex:1;padding:10px;border:none;border-radius:12px;font-size:0.85rem;font-weight:800;cursor:pointer;background:var(--card-bg);color:var(--text-dim);border:1px solid var(--border);transition:all .2s;">💾 Backup</button>
+        </div>
+
+        <!-- ── Statistics Sub-tab ── -->
+        <div id="bkStatsPanel">
+
+            <!-- Filters: 2x3 grid, member is dropdown filtered by group -->
+            <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:10px 12px;margin-bottom:10px;">
+                <div style="font-size:0.65rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🔍 Filters</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+                    <div>
+                        <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">🏦 Group</label>
+                        <select id="statGroupFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="onStatGroupFilterChange()">
+                            <option value="">All Groups</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">👤 Member</label>
+                        <select id="statMemberFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="applyStatSubFilter()">
+                            <option value="">All Members</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">📅 Month</label>
+                        <select id="statMonthFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="applyStatSubFilter()">
+                            <option value="">All Months</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">💳 Mode</label>
+                        <select id="statModeFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="applyStatSubFilter()">
+                            <option value="">All Modes</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-size:0.65rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;display:block;margin-bottom:3px;">✅ Chit Picked</label>
+                        <select id="statChitFilter" class="form-input" style="margin-bottom:0;font-size:0.78rem;padding:7px 9px;" onchange="applyStatSubFilter()">
+                            <option value="">All</option>
+                            <option value="Yes">Picked ✅</option>
+                            <option value="No">Not Picked</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="clearStatFilters()" style="flex:1;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.25);color:#ef4444;border-radius:8px;padding:7px;font-size:0.75rem;font-weight:800;cursor:pointer;">✕ Clear</button>
+                    <button onclick="loadStatistics()" style="flex:1;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;border-radius:8px;padding:7px;font-size:0.75rem;font-weight:800;cursor:pointer;">🔄 Refresh</button>
+                </div>
+            </div>
+
+            <!-- Hidden state — keep for backup.js compatibility -->
+            <input type="hidden" id="sfActiveGroup">
+            <input type="hidden" id="sfActiveMode">
+            <input type="hidden" id="sfActiveChit">
+            <input type="hidden" id="sfActiveMember">
+            <input type="hidden" id="sfActiveMonth">
+            <div style="display:none">
+                <select id="statFilterType"></select>
+                <div id="statSubFilterWrap"><div id="sfGroup"></div><div id="sfMode"></div><div id="sfChit"></div><div id="sfMember"></div></div>
+                <div id="statActiveFilters"></div>
+            </div>
+
+            <!-- Tables: 2 per row -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+
+                <!-- Summary -->
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:0.62rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">📊 Summary</div>
+                    <table style="width:100%;border-collapse:collapse;">
+                        <tbody>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <td style="padding:7px 10px;font-size:0.72rem;color:var(--text-dim);">💰 Collected</td>
+                                <td id="statTotalCollected" style="padding:7px 10px;font-size:0.82rem;font-weight:800;color:#f39c12;text-align:right;">₹0</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <td style="padding:7px 10px;font-size:0.72rem;color:var(--text-dim);">📋 Balance</td>
+                                <td id="statTotalBalance" style="padding:7px 10px;font-size:0.82rem;font-weight:800;color:#f87171;text-align:right;">₹0</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <td style="padding:7px 10px;font-size:0.72rem;color:var(--text-dim);">📝 Payments</td>
+                                <td id="statTotalPayments" style="padding:7px 10px;font-size:0.82rem;font-weight:800;color:#34d399;text-align:right;">0</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <td style="padding:7px 10px;font-size:0.72rem;color:var(--text-dim);">🎯 Chits Picked</td>
+                                <td id="statChitsPicked" style="padding:7px 10px;font-size:0.82rem;font-weight:800;color:#a5b4fc;text-align:right;">0</td>
+                            </tr>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <td style="padding:7px 10px;font-size:0.72rem;color:var(--text-dim);">👥 Members</td>
+                                <td id="statTotalMembers" style="padding:7px 10px;font-size:0.82rem;font-weight:800;color:#60a5fa;text-align:right;">0</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:7px 10px;font-size:0.72rem;color:var(--text-dim);">⏳ Pending</td>
+                                <td id="statPendingChits" style="padding:7px 10px;font-size:0.82rem;font-weight:800;color:#f59e0b;text-align:right;">0</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Payment Modes -->
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:0.62rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">💳 Payment Modes</div>
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:rgba(255,255,255,0.02);">
+                                <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:left;">Mode</th>
+                                <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:right;">Amt</th>
+                                <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:right;">%</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statPayModePie"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+
+                <!-- Monthly Collections -->
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:0.62rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">📅 Monthly</div>
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:rgba(255,255,255,0.02);">
+                                <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:left;">Month</th>
+                                <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:right;">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statMonthlyChart"></tbody>
+                    </table>
+                    <div id="statMonthlyLabels" style="display:none;"></div>
+                </div>
+
+                <!-- Group Breakdown -->
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+                    <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:0.62rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">🏦 Groups</div>
+                    <table style="width:100%;border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:rgba(255,255,255,0.02);">
+                                <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:left;">Group</th>
+                                <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:right;">Collected</th>
+                            </tr>
+                        </thead>
+                        <tbody id="statGroupList"></tbody>
+                    </table>
+                </div>
+
+            </div>
+
+            <!-- Top Members full width -->
+            <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;">
+                <div style="padding:7px 12px;border-bottom:1px solid var(--border);font-size:0.62rem;font-weight:800;color:#a5b4fc;text-transform:uppercase;letter-spacing:.4px;">🏆 Top Contributors</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead>
+                        <tr style="background:rgba(255,255,255,0.02);">
+                            <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:left;">#</th>
+                            <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:left;">Member</th>
+                            <th style="padding:5px 10px;font-size:0.6rem;color:var(--text-dim);font-weight:700;text-align:right;">Total Paid</th>
+                        </tr>
+                    </thead>
+                    <tbody id="statTopMembers"></tbody>
+                </table>
+            </div>
+
+        </div>
+
+        <!-- ── Backup Sub-tab ── -->
+        <div id="bkBackupPanel" style="display:none;">
+            <div class="stat-card p-4">
+                <button class="btn btn-warning w-100 py-3 mb-2 fw-bold" onclick="exportFullBackup()">💾 Download JSON Backup</button>
+                <button class="btn btn-success w-100 py-3 mb-3 fw-bold" onclick="exportToExcel()">📊 Export to Excel (.xlsx)</button>
+                <hr style="border-color:var(--border);">
+                <p class="small mb-2" style="color:var(--text-dim);">Restore all data from backup file:</p>
+                <input type="file" id="restoreFile" class="form-control mb-2 bg-dark text-white border-secondary" accept=".json">
+                <button class="btn btn-outline-info w-100 py-3 fw-bold" onclick="confirmRestore()">🔄 Restore All Data</button>
+                <p class="small mt-2 text-center" style="color:#ef4444;">⚠️ This will overwrite existing data</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══════ MODALS ══════ -->
+
+<!-- MEMBER MODAL -->
+<div id="memberModal" class="modal-overlay">
+    <div class="modal-content-custom">
+        <div class="modal-title" id="memberModalTitle">👤 Create Member</div>
+        <input type="hidden" id="editMemberId">
+        <label class="form-label-small">Full Name</label>
+        <input type="text" id="mName" class="form-input" placeholder="e.g. Rama Krishna">
+        <label class="form-label-small">Phone Number</label>
+        <input type="text" id="mPhone" class="form-input" placeholder="e.g. 9876543210">
+        <label class="form-label-small">Group Enrollments <span style="color:var(--text-dim);font-size:1.05rem;">(same group multiple times allowed)</span></label>
+        <div id="enrollmentList" style="margin-bottom:8px;display:flex;flex-direction:column;gap:6px;"></div>
+        <button type="button" onclick="addEnrollmentRow()" style="background:rgba(243,156,18,.12);border:1px dashed rgba(243,156,18,.4);color:#f39c12;border-radius:10px;padding:8px;width:100%;font-size:1rem;font-weight:700;cursor:pointer;margin-bottom:12px;">+ Add Group Enrollment</button>
+        <button class="btn-save" onclick="saveMember()">✓ Save Member</button>
+        <div id="deleteMemberArea" style="display:none;">
+            <button class="btn-danger-full" onclick="deleteMemberFromModal()">🗑 Delete Member</button>
+        </div>
+        <button class="btn-cancel" onclick="closeModal('memberModal')">Cancel</button>
+    </div>
+</div>
+
+<!-- GROUP MODAL -->
+<div id="groupModal" class="modal-overlay">
+    <div class="modal-content-custom">
+        <div class="modal-title" id="groupModalTitle">🏦 New Group</div>
+        <input type="hidden" id="editGroupId">
+        <label class="form-label-small">Group Name</label>
+        <input type="text" id="gName" class="form-input" placeholder="e.g. Group A">
+        <label class="form-label-small">Duration (Months)</label>
+        <input type="number" id="gDuration" class="form-input" placeholder="e.g. 21">
+        <label class="form-label-small">Monthly Due Day (1–31)</label>
+        <input type="number" id="gDueDay" class="form-input" placeholder="e.g. 5 means 5th of every month" min="1" max="31">
+        <label class="form-label-small">Start Date</label>
+        <input type="date" id="gStart" class="form-input">
+        <label class="form-label-small">Amount Type</label>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:10px 12px;cursor:pointer;">
+                <input type="radio" name="gAmtType" id="gAmtFixed" value="fixed" onchange="toggleGroupAmtType()" checked style="accent-color:#6366f1;">
+                <span style="font-size:0.85rem;font-weight:700;color:#a5b4fc;">💰 Fixed Amount</span>
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:10px;padding:10px 12px;cursor:pointer;">
+                <input type="radio" name="gAmtType" id="gAmtVariable" value="variable" onchange="toggleGroupAmtType()" style="accent-color:#f59e0b;">
+                <span style="font-size:0.85rem;font-weight:700;color:#f59e0b;">📊 Variable Amount</span>
+            </label>
+        </div>
+        <div id="gFixedAmtRow" style="margin-bottom:12px;">
+            <label class="form-label-small">Fixed Monthly Amount (₹)</label>
+            <input type="number" id="gFixedAmt" class="form-input" placeholder="e.g. 23077">
+        </div>
+        <button class="btn-save" onclick="saveGroup()">✓ Save Group</button>
+        <div id="deleteGroupArea" style="display:none;">
+            <button class="btn-danger-full" onclick="deleteGroupFromModal()">🗑 Delete Group</button>
+        </div>
+        <button class="btn-cancel" onclick="closeModal('groupModal')">Cancel</button>
+    </div>
+</div>
+
+<!-- PAYMENT MODAL -->
+<div id="paymentModal" class="modal-overlay">
+    <div class="modal-content-custom pay-modal">
+
+        <!-- Header row: title + refresh + close -->
+        <div class="pm-head" style="display:flex;align-items:center;gap:8px;">
+            <div style="font-size:1rem;font-weight:800;color:#f39c12;flex:1;">💳 Record Payment</div>
+            <button onclick="resetPaymentForm()" title="Clear" style="background:rgba(243,156,18,.12);border:1px solid rgba(243,156,18,.3);color:#f39c12;border-radius:8px;padding:6px 10px;font-size:0.8rem;font-weight:700;cursor:pointer;">🔄</button>
+            <button onclick="closeModal('paymentModal')" style="background:none;border:none;color:var(--text-dim);font-size:1.2rem;cursor:pointer;padding:2px 6px;">✕</button>
+        </div>
+
+        <div class="pm-body">
+        <!-- Date + Member on same row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+            <div>
+                <label class="form-label-small">Date</label>
+                <input type="date" id="pDate" class="form-input" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;">
+            </div>
+            <div>
+                <label class="form-label-small">Member</label>
+                <div style="position:relative;">
+                    <input type="text" id="pMemberSearch" class="form-input" placeholder="🔍 Search…" oninput="filterSearch('pMemberSearch','pMemberList','pMember')" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;">
+                    <input type="hidden" id="pMember">
+                    <div id="pMemberList" class="suggestions-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Group + Payment Type on same row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+            <div>
+                <label class="form-label-small">Group / Slot</label>
+                <select id="pGroup" class="form-input" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;"><option value="">-- Member first --</option></select>
+                <input type="hidden" id="pEnrollmentId">
+                <input type="hidden" id="pSlotNum" value="1">
+            </div>
+            <div>
+                <label class="form-label-small">Type</label>
+                <select id="pNumMonths" class="form-input" onchange="onNumMonthsChange()" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;">
+                    <option value="1" selected>Single Month</option>
+                    <option value="multi">Multi Month 📅</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="jointMemberBanner" style="display:none;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.28);border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:0.8rem;"></div>
+
+        <!-- Single Month dropdown -->
+        <div id="singleMonthDropdownWrap" style="display:none;margin-bottom:8px;">
+            <label class="form-label-small">📅 Which Month?</label>
+            <select id="pSingleMonthSlot" class="form-input" onchange="onSingleMonthSlotChange()" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;">
+                <option value="">-- Select Month --</option>
+            </select>
+            <div id="singleMonthBadge" style="display:none;border-radius:7px;padding:5px 10px;font-size:0.82rem;margin-top:5px;border:1px solid;"></div>
+        </div>
+
+        <!-- Multi Month grid -->
+        <div id="multiMonthPreview" style="margin-bottom:8px;">
+            <div style="font-size:0.78rem;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">📅 Select Months</div>
+            <div id="monthSelectorGrid" class="month-selector-grid"></div>
+            <div id="selectedSummary" class="selected-summary" style="display:none;"></div>
+            <div id="perMonthAmtWrap" style="display:none;margin-top:6px;">
+                <label style="font-size:0.75rem;color:#a5b4fc;display:flex;align-items:center;gap:5px;cursor:pointer;">
+                    <input type="checkbox" id="perMonthCustomToggle" onchange="togglePerMonthCustom()"> Different amounts per month
+                </label>
+                <div id="perMonthAmtGrid" style="display:none;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto;margin-top:5px;"></div>
+            </div>
+        </div>
+
+        <!-- Chit Amt + Paid Amt -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px;">
+            <div>
+                <label class="form-label-small">Chit Amt <span id="perMonthLabel" style="color:#a5b4fc;"></span></label>
+                <input type="number" id="pChit" class="form-input" placeholder="₹ per month" oninput="onChitAmtChange()" style="margin-bottom:0;font-size:0.85rem;padding:7px 9px;">
+            </div>
+            <div>
+                <label class="form-label-small">Amount Paid</label>
+                <input type="number" id="pPaid" class="form-input" placeholder="₹ total" oninput="calcBalance()" style="margin-bottom:0;font-size:0.85rem;padding:7px 9px;">
+            </div>
+        </div>
+
+        <!-- Total chit ref bar -->
+        <div id="totalChitRef" style="display:none;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.25);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:0.82rem;flex-wrap:wrap;gap:6px 16px;">
+            <span style="color:var(--text-dim);">Total: <span id="totalChitVal" style="color:#a5b4fc;font-weight:700;"></span></span>
+            <span id="prevPaidWrap" style="color:var(--text-dim);display:none;">Already paid: <span id="prevPaidVal" style="color:#34d399;font-weight:700;"></span></span>
+            <span style="color:var(--text-dim);">Balance: <span id="totalBalVal" style="color:#f59e0b;font-weight:700;"></span></span>
+        </div>
+
+        <!-- Paid By + Chit Picked + Note on compact grid -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px;">
+            <div>
+                <label class="form-label-small">Paid By</label>
+                <div style="display:flex;gap:4px;">
+                    <select id="pPaidBy" class="form-input" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;flex:1;">
+                        <option value="">-- Mode --</option>
+                    </select>
+                    <button type="button" onclick="openManagePaidBy('pPaidBy')" style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;border-radius:7px;padding:7px 8px;font-size:0.8rem;cursor:pointer;flex-shrink:0;">⚙️</button>
+                </div>
+                <!-- hidden autocomplete div kept for JS compat -->
+                <div id="pPaidByDrop" style="display:none;"></div>
+            </div>
+            <div>
+                <label class="form-label-small">Chit Picked?</label>
+                <select id="pChitPicked" class="form-input" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;" onchange="toggleChitPickedName()">
+                    <option value="No">No</option>
+                    <option value="Yes">Yes ✅</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="chitPickedNameDiv" style="display:none;margin-bottom:6px;">
+            <input type="text" id="pChitPickedBy" class="form-input" placeholder="Chit picked value / winner" style="margin-bottom:0;font-size:0.8rem;padding:7px 9px;">
+        </div>
+
+        <!-- Hidden payment note fields — kept for JS compatibility -->
+        <select id="pPaymentNote" style="display:none;"><option value="">-- None --</option><option value="Advance">Advance</option><option value="Partial">Partial</option><option value="Late Fee">Late Fee</option><option value="Custom">Custom…</option></select>
+        <input type="text" id="pCustomNote" style="display:none;">
+        <div id="pCustomNoteWrap" style="display:none;"></div>
+
+        </div><!-- /pm-body -->
+
+        <!-- Action buttons (always visible) -->
+        <div class="pm-foot">
+            <button class="btn-save" onclick="savePayment()" style="margin-bottom:0;">✓ Save</button>
+            <button class="btn-cancel" onclick="closeModal('paymentModal')" style="margin-bottom:0;">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- MANAGE PAID BY MODAL -->
+<div id="managePaidByModal" class="modal-overlay">
+    <div class="modal-content-custom" style="max-width:360px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div class="modal-title" style="margin-bottom:0;">⚙️ Manage Payment Modes</div>
+            <button onclick="closeModal('managePaidByModal')" style="background:none;border:none;color:var(--text-dim);font-size:1.3rem;cursor:pointer;">✕</button>
+        </div>
+        <div id="paidByOptionsList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;max-height:260px;overflow-y:auto;"></div>
+        <div style="display:flex;gap:6px;">
+            <input type="text" id="newPaidByInput" class="form-input" style="margin-bottom:0;flex:1;" placeholder="Add new option..." onkeydown="if(event.key==='Enter')addPaidByOption()">
+            <button onclick="addPaidByOption()" style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#10b981;border-radius:10px;padding:10px 14px;font-size:0.9rem;font-weight:800;cursor:pointer;flex-shrink:0;">+ Add</button>
+        </div>
+        <button class="btn-save" style="margin-top:12px;" onclick="savePaidByOptions()">✓ Done</button>
+    </div>
+</div>
+
+<!-- EDIT PAYMENT MODAL -->
+<div id="editPaymentModal" class="modal-overlay">
+    <div class="modal-content-custom">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div class="modal-title" style="margin-bottom:0;">✏️ Edit Payment</div>
+            <button onclick="closeModal('editPaymentModal')" style="background:none;border:none;color:var(--text-dim);font-size:1.3rem;cursor:pointer;">✕</button>
+        </div>
+        <input type="hidden" id="epId">
+        <div id="epMultiMonthInfo" style="display:none;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:10px;padding:10px 14px;margin-bottom:12px;">
+            <div style="font-size:0.98rem;color:#a5b4fc;font-weight:700;margin-bottom:4px;">📅 MULTI-MONTH PAYMENT</div>
+            <div id="epMultiMonthDetail" style="font-size:1.05rem;color:#c7d2fe;"></div>
+            <div style="font-size:0.92rem;color:var(--text-dim);margin-top:4px;">This is part of a grouped payment. Editing updates this month's record only.</div>
+        </div>
+        <label class="form-label-small">Payment Date</label>
+        <input type="date" id="epDate" class="form-input">
+        <div class="row g-2">
+            <div class="col-6"><label class="form-label-small">Chit Amount</label><input type="number" id="epChit" class="form-input" placeholder="₹" oninput="epCalcBalance()"></div>
+            <div class="col-6"><label class="form-label-small">Amount Paid</label><input type="number" id="epPaid" class="form-input" placeholder="₹" oninput="epCalcBalance()"></div>
+        </div>
+        <label class="form-label-small">Balance (auto)</label>
+        <input type="number" id="epBal" class="form-input" placeholder="Balance" readonly style="opacity:.7;">
+
+        <!-- Payment Note -->
+        <label class="form-label-small" style="margin-top:10px;">Payment Note</label>
+        <select id="epPaymentNote" class="form-input" onchange="onEditNoteChange()">
+            <option value="">-- None --</option>
+            <option value="Advance">Advance</option>
+            <option value="Partial">Partial</option>
+            <option value="Late Fee">Late Fee</option>
+            <option value="Custom">Custom…</option>
+        </select>
+        <input type="text" id="epCustomNote" class="form-input" placeholder="Enter custom note" style="display:none;margin-top:6px;">
+
+        <label class="form-label-small">Paid By</label>
+        <div style="display:flex;gap:6px;">
+            <input type="text" id="epPaidBy" class="form-input" style="margin-bottom:0;flex:1;" placeholder="Payment mode">
+            <button onclick="openManagePaidBy('epPaidBy')" title="Manage modes" style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;border-radius:10px;padding:8px 10px;font-size:0.75rem;cursor:pointer;flex-shrink:0;">⚙️</button>
+        </div>
+        <div id="epPaidByDrop" class="paid-by-dropdown" style="display:none;"></div>
+        <label class="form-label-small" style="margin-top:10px;">Chit Picked?</label>
+        <select id="epChitPicked" class="form-input" style="margin-bottom:0;"><option value="No">No</option><option value="Yes">Yes ✅</option></select>
+        <div id="epChitPickedNameDiv" style="display:none;margin-top:8px;"><label class="form-label-small">Chit Picked Value</label><input type="text" id="epChitPickedBy" class="form-input" placeholder="Enter chit picked value"></div>
+        <button class="btn-save" onclick="saveEditPayment()">✓ Update Payment</button>
+        <button class="btn-cancel" onclick="closeModal('editPaymentModal')">Cancel</button>
+        <button class="btn-danger-full" style="margin-top:6px;" onclick="deletePayment()">🗑 Delete Payment</button>
+    </div>
+</div>
+
+<!-- ══ MEMBERS QUICK MODAL ════════════════════════════════════════════════════ -->
+<div id="membersQuickModal" class="modal-overlay">
+    <div class="modal-content-custom">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+            <div class="modal-title" style="margin-bottom:0;">👥 All Members</div>
+            <button onclick="closeModal('membersQuickModal')" style="background:none;border:none;color:var(--text-dim);font-size:1.3rem;cursor:pointer;">✕</button>
+        </div>
+        <input type="text" id="mqSearch" class="form-input" placeholder="🔍 Search name or phone…" oninput="filterMembersQuick()" style="margin-bottom:12px;">
+        <div id="membersQuickList" style="display:flex;flex-direction:column;gap:8px;max-height:60vh;overflow-y:auto;"></div>
+    </div>
+</div>
+
+<!-- ══ GROUPS QUICK MODAL ═════════════════════════════════════════════════════ -->
+<div id="groupsQuickModal" class="modal-overlay">
+    <div class="modal-content-custom">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+            <div class="modal-title" style="margin-bottom:0;">📂 All Groups</div>
+            <button onclick="closeModal('groupsQuickModal')" style="background:none;border:none;color:var(--text-dim);font-size:1.3rem;cursor:pointer;">✕</button>
+        </div>
+        <div id="groupsQuickList" style="display:flex;flex-direction:column;gap:10px;max-height:65vh;overflow-y:auto;"></div>
+    </div>
+</div>
+
+<!-- ══ CONFIRM MODAL ══════════════════════════════════════════════════════════ -->
+<div id="confirmModal" class="modal-overlay">
+    <div class="modal-content-custom" style="max-width:340px;">
+        <div style="text-align:center;margin-bottom:16px;">
+            <div id="confirmIcon" style="font-size:2.5rem;margin-bottom:8px;"></div>
+            <div id="confirmTitle" style="font-size:1.1rem;font-weight:800;margin-bottom:6px;"></div>
+            <div id="confirmMsg" style="font-size:0.9rem;color:var(--text-dim);"></div>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button id="confirmOkBtn" class="btn-save" style="flex:1;">Confirm</button>
+            <button class="btn-cancel" style="flex:1;" onclick="closeModal('confirmModal')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ ACCESS REQUESTS MODAL ══════════════════════════════════════════════════ -->
+<div id="accessModal" class="modal-overlay">
+    <div class="modal-content-custom">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+            <div class="modal-title" style="margin-bottom:0;">🔐 Access Requests</div>
+            <button onclick="closeModal('accessModal')" style="background:none;border:none;color:var(--text-dim);font-size:1.3rem;cursor:pointer;">✕</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:14px;">
+            <button id="reqTabPending" class="btn-save" style="flex:1;font-size:0.8rem;padding:8px;" onclick="filterRequests('pending')">⏳ Pending</button>
+            <button id="reqTabApproved" class="btn-cancel" style="flex:1;font-size:0.8rem;padding:8px;" onclick="filterRequests('approved')">✅ Approved</button>
+            <button id="reqTabAll" class="btn-cancel" style="flex:1;font-size:0.8rem;padding:8px;" onclick="filterRequests('all')">📋 All</button>
+        </div>
+        <div id="accessRequestsList" style="max-height:60vh;overflow-y:auto;"></div>
+    </div>
+</div>
+
+<!-- ══ BOTTOM NAV BAR ════════════════════════════════════════════════════════ -->
+<nav class="nav-bar">
+    <div id="navHome" class="nav-item active" onclick="switchTab('home')">
+        <div style="font-size:1.3rem;">🏠</div>
+        <div>Home</div>
+    </div>
+    <div id="navGroups" class="nav-item" onclick="switchTab('groups')">
+        <div style="font-size:1.3rem;">📂</div>
+        <div>Groups</div>
+    </div>
+    <div id="navPlanner" class="nav-item" onclick="switchTab('planner')">
+        <div style="font-size:1.3rem;">📅</div>
+        <div>Planner</div>
+    </div>
+    <div id="navBackup" class="nav-item" onclick="switchTab('backup')">
+        <div style="font-size:1.3rem;">📊</div>
+        <div>Statistics</div>
+    </div>
+</nav>
+<!-- ══ END BOTTOM NAV BAR ════════════════════════════════════════════════════ -->
+
+<!-- Scripts — load in dependency order -->
+<script src="js/config.js"></script>
+<script src="js/firebase.js?v=20260610_v1"></script>
+<script src="js/helpers.js?v=20260619_v2"></script>
+<script src="js/ui.js?v=20260717_v8"></script>
+<script src="js/ledger.js?v=20261017_v2"></script>
+<script src="js/members.js?v=20260610_v1"></script>
+<script src="js/groups.js?v=20260717_v2"></script>
+<script src="js/payments.js?v=20261017_v12"></script>
+<script src="js/acks.js?v=20261015_v6"></script>
+<script src="js/backup.js?v=20260717_v6"></script>
+<script src="js/planner.js?v=20260613_v2"></script>
+<script src="js/print.js?v=20261015_v5"></script>
+<script src="js/auth.js?v=20260614_v4"></script>
+<script src="js/quickview.js?v=20260610_v1"></script>
+<script src="js/qr.js?v=20260613_v3"></script>
+<script src="js/init.js?v=20260610_v1"></script>
+
+</body>
+</html>
